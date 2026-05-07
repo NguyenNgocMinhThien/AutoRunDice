@@ -1,11 +1,8 @@
-import axios from 'axios';
+import { chromium } from 'playwright';
 import XLSX from 'xlsx';
-import * as cheerio from 'cheerio';
 import fs from 'fs';
 import FormData from 'form-data';
-import { createRequire } from 'module';
-
-const require = createRequire(import.meta.url);
+import axios from 'axios';
 
 const KEYWORDS = ["Analyst", "CFA", "CEO", "Data Science", "FP&A"];
 
@@ -110,94 +107,102 @@ async function sendTelegramFile(filePath) {
 
 // ====================== HÀM CHÍNH ======================
 async function runScraper() {
-    console.log("🚀 Khởi động Dice.com Scraper...");
+    console.log("🚀 Khởi động Dice.com Scraper bằng Playwright...");
+
+    const browser = await chromium.launch({ 
+        headless: true 
+    });
 
     let allJobs = [];
 
-    const userAgents = [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0"
-    ];
-
     for (const keyword of KEYWORDS) {
         let attempts = 0;
-        const maxAttempts = 4;
+        const maxAttempts = 3;
 
         while (attempts < maxAttempts) {
+            attempts++;
+            console.log(`🔍 Quét từ khóa: ${keyword} (Lần ${attempts})...`);
+
             try {
-                attempts++;
-                console.log(`🔍 Quét từ khóa: ${keyword} (Lần ${attempts})...`);
-
-                const targetUrl = `https://www.dice.com/jobs?q=${encodeURIComponent(keyword)}&countryCode=US&radius=30&radiusUnit=mi&language=en&page=1&pageSize=50`;
-
-                const response = await axios.get('http://api.scraperapi.com', {
-                    params: {
-                        api_key: process.env.SCRAPER_API_KEY,
-                        url: targetUrl,
-                        render: 'true',
-                        keep_headers: 'true'
-                    },
-                    headers: {
-                        'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)],
-                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                        'Accept-Language': 'en-US,en;q=0.9',
-                        'Referer': 'https://www.dice.com/'
-                    },
-                    timeout: 90000
+                const page = await browser.newPage();
+                
+                await page.setViewportSize({ width: 1920, height: 1080 });
+                await page.setExtraHTTPHeaders({
+                    'Accept-Language': 'en-US,en;q=0.9'
                 });
 
-                const $ = cheerio.load(response.data);
-                let count = 0;
+                const url = `https://www.dice.com/jobs?q=${encodeURIComponent(keyword)}&countryCode=US&radius=30&radiusUnit=mi&language=en&page=1&pageSize=50`;
+                
+                await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
 
-                // Lấy các thẻ chứa job
-                $('div[data-cy="search-card"], article, div[class*="JobCard"]').each((index, element) => {
-                    const titleElement = $(element).find('a[data-cy="card-title-link"], h3 a, h2 a').first();
-                    const title = titleElement.text().trim();
+                // Chờ job cards xuất hiện
+                await page.waitForSelector('a[href*="/job-detail/"]', { timeout: 30000 }).catch(() => {});
 
-                    if (!title) return;
+                const jobsOnPage = await page.evaluate((currentKeyword) => {
+                    const jobs = [];
+                    const cards = document.querySelectorAll('a[href*="/job-detail/"]');
 
-                    let jobLink = titleElement.attr('href');
-                    const fullLink = jobLink && jobLink.startsWith('http') 
-                        ? jobLink 
-                        : `https://www.dice.com${jobLink}`;
+                    cards.forEach(link => {
+                        const title = link.textContent.trim();
+                        if (!title) return;
 
-                    const company = $(element).find('[data-cy="company-name"], .company-name, .employer').text().trim() || "N/A";
-                    const location = $(element).find('[data-cy="location"], .location').text().trim() || "N/A";
-                    const salary = $(element).find('[data-cy="salary"], .salary, .compensation').text().trim() || "";
-                    const postedTime = $(element).find('time').text().trim() || "";
+                        const jobUrl = link.href;
 
-                    allJobs.push({
-                        Title: title,
-                        Company: company,
-                        Salary: salary,
-                        Location: location,
-                        Posted: postedTime,
-                        Link: fullLink,
-                        Keyword: keyword
+                        let company = "N/A";
+                        let location = "N/A";
+                        let salary = "";
+                        let posted = "";
+
+                        const container = link.closest('div') || link.parentElement;
+                        if (container) {
+                            const textContent = container.textContent || "";
+                            
+                            // Tìm company (thường là dòng ngay sau title)
+                            const lines = textContent.split('\n').map(l => l.trim()).filter(Boolean);
+                            if (lines.length > 1) {
+                                company = lines[1] || "N/A";
+                            }
+
+                            // Tìm salary
+                            const salaryMatch = textContent.match(/(\$\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*-\s*\$\d{1,3}(?:,\d{3})*)?)/);
+                            if (salaryMatch) salary = salaryMatch[0];
+
+                            // Tìm posted time
+                            const timeMatch = textContent.match(/(Today|Yesterday|\d+\s*d\s*ago|\d+\s*h\s*ago)/i);
+                            if (timeMatch) posted = timeMatch[0];
+                        }
+
+                        jobs.push({
+                            Title: title,
+                            Company: company,
+                            Salary: salary,
+                            Location: location,
+                            Posted: posted,
+                            Link: jobUrl,
+                            Keyword: currentKeyword
+                        });
                     });
 
-                    count++;
-                });
+                    return jobs;
+                }, keyword);   // ← Truyền keyword vào đây
 
-                console.log(`✅ Lấy được ${count} jobs cho từ khóa "${keyword}"`);
+                console.log(`✅ Lấy được ${jobsOnPage.length} jobs cho "${keyword}"`);
+                allJobs = allJobs.concat(jobsOnPage);
 
-                if (count > 3) {
-                    break; // Thành công thì không thử lại
+                await page.close();
+
+                if (jobsOnPage.length > 2) {
+                    break;
                 }
 
             } catch (error) {
-                console.log(`❌ Lỗi ${keyword} (Lần ${attempts}): ${error.message}`);
-
-                if (error.response && error.response.status === 403) {
-                    console.log("🔄 Bị chặn 403 - Đang chờ lâu hơn...");
-                    await new Promise(resolve => setTimeout(resolve, 12000 + attempts * 6000));
-                } else {
-                    await new Promise(resolve => setTimeout(resolve, 8000));
-                }
+                console.log(`❌ Lỗi ${keyword} (Lần ${attempts}):`, error.message);
+                await new Promise(r => setTimeout(r, 10000));
             }
         }
     }
+
+    await browser.close();
 
     // ====================== LƯU FILE VÀ GỬI THÔNG BÁO ======================
     if (allJobs.length > 0) {
@@ -208,7 +213,7 @@ async function runScraper() {
         XLSX.utils.book_append_sheet(workbook, worksheet, "Jobs");
         XLSX.writeFile(workbook, fileName);
 
-        console.log(`📊 Đã lưu ${allJobs.length} jobs vào file ${fileName}`);
+        console.log(`📊 Đã lưu ${allJobs.length} jobs vào ${fileName}`);
 
         const fileLink = await uploadToCatbox(fileName);
 
@@ -218,11 +223,11 @@ async function runScraper() {
             sendToTeams(allJobs.length, fileLink)
         ]);
 
-        console.log("🏁 Hoàn tất scraper Dice.com!");
+        console.log("🏁 Hoàn tất!");
     } else {
         console.log("❌ Không tìm thấy job nào.");
         await sendTelegramAlert("❌ Không tìm thấy job mới nào trên Dice.com.");
     }
 }
 
-runScraper();
+runScraper().catch(console.error);
