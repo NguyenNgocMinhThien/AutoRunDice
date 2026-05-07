@@ -94,7 +94,6 @@ async function runScraper() {
     let allJobs = [];
 
     for (const kw of KEYWORDS) {
-        // Đổi location thành Canada để mở rộng phạm vi, đảm bảo có job trả về
         const targetUrl = `https://www.dice.com/jobs?q=${encodeURIComponent(kw)}&location=Canada`;
         let attempts = 0;
         const maxAttempts = 3;
@@ -111,42 +110,40 @@ async function runScraper() {
                         render: 'true',
                         premium: 'true',
                         country_code: 'ca',
-                        wait: 15000 // ⏳ ÉP SCRAPER-API CHỜ 15 GIÂY CHO JS RENDER XONG JOB
+                        wait: 15000 // Ép chờ 15s để JS render xong toàn bộ job
                     },
-                    timeout: 150000 // Tăng thời gian chờ mạng lên 2.5 phút tránh bị đứt gánh
+                    timeout: 150000 
                 });
 
                 const $ = cheerio.load(response.data);
                 const pageTitle = $('title').text().trim();
                 console.log(`   👉 Tiêu đề trang: "${pageTitle}"`);
+
                 let count = 0;
                 
-                // MỞ RỘNG BỘ LỌC ĐỂ TÓM MỌI LOẠI GIAO DIỆN CỦA DICE
-                let jobCards = $('dhi-search-card');
-                if (jobCards.length === 0) {
-                    // Nếu không có thẻ dhi-search-card, tìm tất cả các thẻ có class chứa chữ 'search-card' hoặc 'job-card'
-                    jobCards = $('[class*="search-card"], [class*="job-card"], article.card');
-                }
+                // MẠNG LƯỚI QUÉT MỞ RỘNG TỐI ĐA
+                let jobCards = $('dhi-search-card, .card, [class*="search-card"], [class*="job-card"], div[data-cy="search-card"]');
 
                 jobCards.each((i, el) => {
-                    const titleEl = $(el).find('a.card-title-link, a[data-cy="card-title-link"]');
-                    const title = titleEl.text().trim();
+                    // Quét tiêu đề: Lấy mọi thẻ a có khả năng là tiêu đề
+                    const titleEl = $(el).find('a.card-title-link, a[data-cy="card-title-link"], a[id^="position-"], h5 a');
+                    const title = titleEl.first().text().trim();
 
                     if (!title) return;
 
-                    let relativeLink = titleEl.attr('href');
+                    let relativeLink = titleEl.first().attr('href');
                     let fullLink = relativeLink;
                     if (relativeLink && !relativeLink.startsWith('http')) {
                         fullLink = `https://www.dice.com${relativeLink}`;
                     }
 
-                    const company = $(el).find('a[data-cy="search-result-company-name"]').text().trim() || 
-                                    $(el).find('.card-company a').text().trim() || 
-                                    "N/A";
+                    // Quét công ty
+                    const company = $(el).find('a[data-cy="search-result-company-name"], .card-company a, [data-cy="company-name"]').first().text().trim() || "N/A";
 
-                    const location = $(el).find('span[data-cy="search-result-location"]').text().trim() || 
-                                     "N/A";
+                    // Quét địa điểm
+                    const location = $(el).find('span[data-cy="search-result-location"], [data-cy="location"]').first().text().trim() || "N/A";
 
+                    // Quét lương
                     let salary = "N/A";
                     $(el).find('[class*="badge"], [class*="chip"], dhi-badge span, .badge').each((i, badgeEl) => {
                         let text = $(badgeEl).text().trim();
@@ -159,7 +156,7 @@ async function runScraper() {
                     if (salary === "N/A") {
                         $(el).find('span').each((i, spanEl) => {
                             let text = $(spanEl).text().trim();
-                            if (text.includes('$') && text.length <= 20 && !text.includes('\n')) {
+                            if (text.includes('$') && text.length <= 30 && !text.includes('\n')) {
                                 salary = text;
                                 return false; 
                             }
@@ -185,28 +182,20 @@ async function runScraper() {
                 console.log(`✅ Lấy được ${count} jobs cho từ khóa "${kw}"`);
                 
                 if (count > 0) {
-                    break; // Có job -> Thoát vòng lặp
+                    break; // Thành công, sang từ khóa tiếp theo
                 } else {
                     const lowerTitle = pageTitle.toLowerCase();
                     if (lowerTitle.includes('just a moment') || lowerTitle.includes('datadome') || lowerTitle.includes('security')) {
-                         console.log("   ⚠️ Bị DataDome chặn. Đang đợi thử lại...");
+                         console.log("   ⚠️ Bị chặn nhẹ bởi tường lửa. Đang đợi thử lại...");
                          if (attempts < maxAttempts) await new Promise(r => setTimeout(r, 15000));
                     } else {
-                         // TRANG LOAD THÀNH CÔNG NHƯNG VẪN 0 JOBS
-                         // Lưu lại giao diện trang HTML để bắt bệnh
-                         const debugFileName = `debug_${kw.replace(/\s+/g, '_')}.html`;
-                         fs.writeFileSync(debugFileName, response.data);
-                         console.log("   ⏳ Đang upload file HTML thực tế để kiểm tra...");
-                         const debugLink = await uploadToCatbox(debugFileName);
-                         
-                         console.log(`   🐛 BẤM VÀO LINK NÀY ĐỂ XEM MÀN HÌNH THỰC TẾ: ${debugLink}`);
-                         console.log("   ℹ️ Có thể do trang load quá chậm hoặc không có job thật. Chuyển sang từ khóa tiếp theo.");
+                         console.log("   ℹ️ Web đã tải hoàn thiện nhưng không quét được job nào. Có thể từ khóa này thực sự không có kết quả tại Canada.");
                          break;
                     }
                 }
 
             } catch (err) {
-                console.log(`   ⚠️ Lỗi (lần ${attempts}): ${err.message}`);
+                console.log(`   ⚠️ Lỗi mạng (lần ${attempts}): ${err.message}`);
                 if (attempts < maxAttempts) await new Promise(r => setTimeout(r, 15000));
             }
         }
@@ -232,7 +221,7 @@ async function runScraper() {
 
         console.log("🏁 Hoàn tất!");
     } else {
-        console.log("❌ Không tìm thấy job nào sau khi quét toàn bộ danh sách.");
+        console.log("❌ Quá trình hoàn thành nhưng không bắt được job nào.");
         await sendTelegramAlert("❌ [Dice.com] Không tìm thấy job mới nào hôm nay.");
     }
 }
