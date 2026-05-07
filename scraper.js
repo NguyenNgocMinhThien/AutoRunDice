@@ -71,7 +71,7 @@ async function sendToTeams(totalJobs, fileLink) {
 
 // ====================== HÀM CHÍNH ======================
 async function runScraper() {
-    console.log("🚀 Khởi động Dice.com Scraper...");
+    console.log("🚀 Khởi động Dice.com Scraper (Clean Version)...");
 
     const browser = await chromium.launch({ headless: true });
     let allJobs = [];
@@ -97,35 +97,28 @@ async function runScraper() {
 
                 const jobsOnPage = await page.evaluate((currentKeyword) => {
                     const jobs = [];
-                    const links = document.querySelectorAll('a[href*="/job-detail/"]');
+                    const cards = document.querySelectorAll('div[data-cy="search-card"], article, div[class*="JobCard"]');
 
-                    links.forEach(link => {
-                        let title = link.textContent.trim();
-                        if (!title || title.length < 8) return;
+                    cards.forEach(card => {
+                        const titleEl = card.querySelector('a[href*="/job-detail/"]');
+                        if (!titleEl) return;
 
-                        const fullLink = link.href;
+                        const title = titleEl.textContent.trim();
+                        if (!title || title.length < 10) return;
 
-                        let card = link.closest('div') || link.parentElement;
-                        let fullText = (card ? card.textContent : "").replace(/\s+/g, " ");
+                        const fullLink = titleEl.href;
 
-                        // Tìm salary
+                        const fullText = card.textContent.replace(/\s+/g, " ");
+
+                        // Salary
                         let salary = "";
                         const salaryMatch = fullText.match(/(\$\d{1,3}(?:,\d{3})*(?:\s*-\s*\$\d{1,3}(?:,\d{3})*)?)/);
                         if (salaryMatch) salary = salaryMatch[0];
 
-                        // Nếu không có salary thì vẫn lấy (theo yêu cầu mới nhất của bạn là lấy job)
-                        // Nếu bạn chỉ muốn job có lương thì uncomment dòng dưới
-                        // if (!salary || salary.length < 5) return;
-
+                        // Company
                         let company = "N/A";
-                        const companyEl = card.querySelector('a[data-cy*="company"], [class*="company"]');
+                        const companyEl = card.querySelector('a[data-cy*="company"], [class*="company"], .employer');
                         if (companyEl) company = companyEl.textContent.trim();
-
-                        if (company === "N/A") {
-                            const after = fullText.substring(fullText.indexOf(title) + title.length).trim().substring(0, 100);
-                            const match = after.match(/([A-Za-z0-9\s&.,'-]{6,70})/);
-                            if (match) company = match[1].trim();
-                        }
 
                         jobs.push({
                             Title: title,
