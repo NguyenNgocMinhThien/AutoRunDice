@@ -110,15 +110,15 @@ async function runScraper() {
                         url: targetUrl,
                         render: 'true',
                         premium: 'true',
-                        country_code: 'ca' 
+                        country_code: 'ca',
+                        wait: 15000 // ⏳ ÉP SCRAPER-API CHỜ 15 GIÂY CHO JS RENDER XONG JOB
                     },
-                    timeout: 120000 
+                    timeout: 150000 // Tăng thời gian chờ mạng lên 2.5 phút tránh bị đứt gánh
                 });
 
                 const $ = cheerio.load(response.data);
                 const pageTitle = $('title').text().trim();
                 console.log(`   👉 Tiêu đề trang: "${pageTitle}"`);
-
                 let count = 0;
                 
                 // MỞ RỘNG BỘ LỌC ĐỂ TÓM MỌI LOẠI GIAO DIỆN CỦA DICE
