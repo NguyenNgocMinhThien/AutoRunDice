@@ -35,7 +35,7 @@ async function sendTelegramAlert(message) {
         await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             chat_id: chatId, text: message, parse_mode: 'HTML'
         });
-    } catch (e) { console.error("Telegram Alert Error"); }
+    } catch (e) {}
 }
 
 async function sendTelegramFile(filePath) {
@@ -47,53 +47,26 @@ async function sendTelegramFile(filePath) {
     form.append('document', fs.createReadStream(filePath));
     try {
         await axios.post(`https://api.telegram.org/bot${botToken}/sendDocument`, form, { headers: form.getHeaders() });
-    } catch (e) { console.error("Telegram File Error"); }
+    } catch (e) {}
 }
 
-// ====================== MS TEAMS ======================
 async function sendToTeams(totalJobs, fileLink) {
     const webhookUrl = process.env.TEAMS_WEBHOOK_URL;
-    if (!webhookUrl) {
-        console.log("⚠️ TEAMS_WEBHOOK_URL chưa được thiết lập");
-        return;
-    }
-
+    if (!webhookUrl) return;
     const adaptiveCard = {
-        "type": "AdaptiveCard",
-        "version": "1.4",
+        "type": "AdaptiveCard", "version": "1.4",
         "body": [
-            { 
-                "type": "TextBlock", 
-                "text": "🚀 CẬP NHẬT JOB MỚI TẠI DICE.COM", 
-                "weight": "Bolder", 
-                "size": "Medium", 
-                "color": "Accent" 
-            },
-            {
-                "type": "FactSet",
-                "facts": [
-                    { "title": "Nguồn:", "value": "Dice.com" },
-                    { "title": "Số lượng:", "value": `${totalJobs} jobs` },
-                    { "title": "Trạng thái:", "value": "Đã sẵn sàng ✅" }
-                ]
-            }
+            { "type": "TextBlock", "text": "🚀 CẬP NHẬT JOB MỚI TẠI DICE.COM", "weight": "Bolder", "size": "Medium", "color": "Accent" },
+            { "type": "FactSet", "facts": [
+                { "title": "Nguồn:", "value": "Dice.com" },
+                { "title": "Số lượng:", "value": `${totalJobs} jobs` },
+                { "title": "Trạng thái:", "value": "Đã sẵn sàng ✅" }
+            ]}
         ],
-        "actions": [
-            { 
-                "type": "Action.OpenUrl", 
-                "title": "📥 TẢI FILE EXCEL", 
-                "url": fileLink 
-            }
-        ],
+        "actions": [{ "type": "Action.OpenUrl", "title": "📥 TẢI FILE EXCEL", "url": fileLink }],
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json"
     };
-
-    try {
-        await axios.post(webhookUrl, adaptiveCard);
-        console.log("✅ Đã gửi thông báo thành công đến Microsoft Teams!");
-    } catch (error) {
-        console.error("❌ Lỗi gửi Teams:", error.message);
-    }
+    try { await axios.post(webhookUrl, adaptiveCard); } catch (e) { console.error("Teams Error"); }
 }
 
 // ====================== HÀM CHÍNH ======================
@@ -128,22 +101,30 @@ async function runScraper() {
 
                     links.forEach(link => {
                         let title = link.textContent.trim();
-                        if (!title || title.length < 10 || title.includes("Easy Apply")) return;
+                        if (!title || title.length < 8) return;
 
                         const fullLink = link.href;
 
                         let card = link.closest('div') || link.parentElement;
                         let fullText = (card ? card.textContent : "").replace(/\s+/g, " ");
 
+                        // Salary
                         let salary = "";
                         const salaryMatch = fullText.match(/(\$\d{1,3}(?:,\d{3})*(?:\s*-\s*\$\d{1,3}(?:,\d{3})*)?)/);
                         if (salaryMatch) salary = salaryMatch[0];
 
                         if (!salary || salary.length < 5) return;
 
+                        // Company
                         let company = "N/A";
                         const companyEl = card.querySelector('a[data-cy*="company"], [class*="company"]');
                         if (companyEl) company = companyEl.textContent.trim();
+
+                        if (company === "N/A") {
+                            const after = fullText.substring(fullText.indexOf(title) + title.length).trim().substring(0, 100);
+                            const match = after.match(/([A-Za-z0-9\s&.,'-]{6,70})/);
+                            if (match) company = match[1].trim();
+                        }
 
                         jobs.push({
                             Title: title,
@@ -188,7 +169,7 @@ async function runScraper() {
         await Promise.all([
             sendTelegramAlert(`✅ Dice.com: Tìm thấy ${allJobs.length} jobs có lương!`),
             sendTelegramFile(fileName),
-            sendToTeams(allJobs.length, fileLink)   // ← Đã fix
+            sendToTeams(allJobs.length, fileLink)
         ]);
     } else {
         await sendTelegramAlert("❌ Không tìm thấy job có salary.");
