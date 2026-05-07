@@ -9,7 +9,7 @@ const require = createRequire(import.meta.url);
 
 const KEYWORDS = ["Analyst", "CFA", "CEO", "Data Science", "FP&A"];
 
-// --- HÀM UPLOAD LITTERBOX, TEAMS, TELEGRAM giữ nguyên ---
+// --- HÀM UPLOAD LITTERBOX, TEAMS, TELEGRAM ---
 async function uploadToCatbox(filePath) {
     try {
         const form = new FormData();
@@ -43,7 +43,7 @@ async function sendToTeams(totalJobs, fileLink) {
                 "type": "FactSet",
                 "facts": [
                     { "title": "Nguồn:", "value": "Dice.com" },
-                    { "title": "Khu vực:", "value": "Vancouver, BC" },
+                    { "title": "Khu vực:", "value": "Canada" },
                     { "title": "Số lượng:", "value": `${totalJobs} jobs` },
                     { "title": "Trạng thái:", "value": "Đã sẵn sàng ✅" }
                 ]
@@ -94,7 +94,8 @@ async function runScraper() {
     let allJobs = [];
 
     for (const kw of KEYWORDS) {
-        const targetUrl = `https://www.dice.com/jobs?q=${encodeURIComponent(kw)}&location=Vancouver,%20BC`;
+        // Đổi location thành Canada để mở rộng phạm vi, đảm bảo có job trả về
+        const targetUrl = `https://www.dice.com/jobs?q=${encodeURIComponent(kw)}&location=Canada`;
         let attempts = 0;
         const maxAttempts = 3;
 
@@ -108,24 +109,23 @@ async function runScraper() {
                         api_key: process.env.SCRAPER_API_KEY,
                         url: targetUrl,
                         render: 'true',
-                        premium: 'true', // KÍCH HOẠT PROXY CAO CẤP ĐỂ VƯỢT TƯỜNG LỬA
+                        premium: 'true',
                         country_code: 'ca' 
                     },
                     timeout: 120000 
                 });
 
                 const $ = cheerio.load(response.data);
-                
-                // IN TIÊU ĐỀ TRANG RA LOG ĐỂ KIỂM TRA XEM CÓ BỊ CHẶN KHÔNG
                 const pageTitle = $('title').text().trim();
-                console.log(`   👉 Tiêu đề trang tải được: "${pageTitle}"`);
+                console.log(`   👉 Tiêu đề trang: "${pageTitle}"`);
 
                 let count = 0;
                 
-                // Dự phòng trường hợp Dice đổi tên thẻ HTML của Job card
+                // MỞ RỘNG BỘ LỌC ĐỂ TÓM MỌI LOẠI GIAO DIỆN CỦA DICE
                 let jobCards = $('dhi-search-card');
                 if (jobCards.length === 0) {
-                    jobCards = $('.card, [class*="job-card"], [class*="search-card"]');
+                    // Nếu không có thẻ dhi-search-card, tìm tất cả các thẻ có class chứa chữ 'search-card' hoặc 'job-card'
+                    jobCards = $('[class*="search-card"], [class*="job-card"], article.card');
                 }
 
                 jobCards.each((i, el) => {
@@ -145,7 +145,7 @@ async function runScraper() {
                                     "N/A";
 
                     const location = $(el).find('span[data-cy="search-result-location"]').text().trim() || 
-                                     "Vancouver, BC";
+                                     "N/A";
 
                     let salary = "N/A";
                     $(el).find('[class*="badge"], [class*="chip"], dhi-badge span, .badge').each((i, badgeEl) => {
@@ -185,22 +185,29 @@ async function runScraper() {
                 console.log(`✅ Lấy được ${count} jobs cho từ khóa "${kw}"`);
                 
                 if (count > 0) {
-                    break; // Thành công, thoát vòng lặp để quét từ khóa tiếp theo
+                    break; // Có job -> Thoát vòng lặp
                 } else {
-                    // Logic xử lý khi 0 jobs:
                     const lowerTitle = pageTitle.toLowerCase();
-                    if (lowerTitle.includes('just a moment') || lowerTitle.includes('datadome') || lowerTitle.includes('access denied') || lowerTitle.includes('security')) {
-                         console.log("   ⚠️ Phát hiện bị chặn bởi tường lửa CAPTCHA. Đang đợi để thử lại...");
+                    if (lowerTitle.includes('just a moment') || lowerTitle.includes('datadome') || lowerTitle.includes('security')) {
+                         console.log("   ⚠️ Bị DataDome chặn. Đang đợi thử lại...");
                          if (attempts < maxAttempts) await new Promise(r => setTimeout(r, 15000));
                     } else {
-                         console.log("   ℹ️ Quét thành công, nhưng hiện tại không có job nào trên Dice cho từ khóa này.");
-                         break; // Trang load bình thường nhưng ko có job -> Bỏ qua thử lại
+                         // TRANG LOAD THÀNH CÔNG NHƯNG VẪN 0 JOBS
+                         // Lưu lại giao diện trang HTML để bắt bệnh
+                         const debugFileName = `debug_${kw.replace(/\s+/g, '_')}.html`;
+                         fs.writeFileSync(debugFileName, response.data);
+                         console.log("   ⏳ Đang upload file HTML thực tế để kiểm tra...");
+                         const debugLink = await uploadToCatbox(debugFileName);
+                         
+                         console.log(`   🐛 BẤM VÀO LINK NÀY ĐỂ XEM MÀN HÌNH THỰC TẾ: ${debugLink}`);
+                         console.log("   ℹ️ Có thể do trang load quá chậm hoặc không có job thật. Chuyển sang từ khóa tiếp theo.");
+                         break;
                     }
                 }
 
             } catch (err) {
                 console.log(`   ⚠️ Lỗi (lần ${attempts}): ${err.message}`);
-                if (attempts < maxAttempts) await new Promise(r => setTimeout(r, 15000)); // Đợi 15s trước khi thử lại
+                if (attempts < maxAttempts) await new Promise(r => setTimeout(r, 15000));
             }
         }
     }
@@ -218,7 +225,7 @@ async function runScraper() {
         const fileLink = await uploadToCatbox(fileName);
 
         await Promise.all([
-            sendTelegramAlert(`✅ [Dice.com] Tìm thấy ${allJobs.length} jobs mới tại Vancouver!`),
+            sendTelegramAlert(`✅ [Dice.com] Tìm thấy ${allJobs.length} jobs mới tại Canada!`),
             sendTelegramFile(fileName),
             sendToTeams(allJobs.length, fileLink)
         ]);
