@@ -50,28 +50,9 @@ async function sendTelegramFile(filePath) {
     } catch (e) {}
 }
 
-async function sendToTeams(totalJobs, fileLink) {
-    const webhookUrl = process.env.TEAMS_WEBHOOK_URL;
-    if (!webhookUrl) return;
-    const adaptiveCard = {
-        "type": "AdaptiveCard", "version": "1.4",
-        "body": [
-            { "type": "TextBlock", "text": "🚀 CẬP NHẬT JOB MỚI TẠI DICE.COM", "weight": "Bolder", "size": "Medium", "color": "Accent" },
-            { "type": "FactSet", "facts": [
-                { "title": "Nguồn:", "value": "Dice.com" },
-                { "title": "Số lượng:", "value": `${totalJobs} jobs` },
-                { "title": "Trạng thái:", "value": "Đã sẵn sàng ✅" }
-            ]}
-        ],
-        "actions": [{ "type": "Action.OpenUrl", "title": "📥 TẢI FILE EXCEL", "url": fileLink }],
-        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json"
-    };
-    try { await axios.post(webhookUrl, adaptiveCard); } catch (e) {}
-}
-
 // ====================== HÀM CHÍNH ======================
 async function runScraper() {
-    console.log("🚀 Khởi động Dice.com Scraper (Clean Version)...");
+    console.log("🚀 Khởi động Dice.com Scraper (Ultra Salary Mode)...");
 
     const browser = await chromium.launch({ headless: true });
     let allJobs = [];
@@ -95,35 +76,59 @@ async function runScraper() {
                 await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
                 await page.waitForTimeout(5000);
 
-                const jobsOnPage = await page.evaluate((currentKeyword) => {
+                const result = await page.evaluate((currentKeyword) => {
                     const jobs = [];
-                    const cards = document.querySelectorAll('div[data-cy="search-card"], article, div[class*="JobCard"]');
+                    const links = document.querySelectorAll('a[href*="/job-detail/"]');
 
-                    cards.forEach(card => {
-                        const titleEl = card.querySelector('a[href*="/job-detail/"]');
-                        if (!titleEl) return;
-
-                        const title = titleEl.textContent.trim();
+                    links.forEach(link => {
+                        const title = link.textContent.trim();
                         if (!title || title.length < 10) return;
 
-                        const fullLink = titleEl.href;
+                        const fullLink = link.href;
 
-                        const fullText = card.textContent.replace(/\s+/g, " ");
+                        // Tìm vùng chứa salary rộng nhất
+                        let textToSearch = document.body.textContent || "";
 
-                        // Salary
+                        // Hoặc thu hẹp quanh link
+                        let parent = link.parentElement;
+                        for (let i = 0; i < 8; i++) {
+                            if (parent) {
+                                textToSearch = parent.textContent || textToSearch;
+                                parent = parent.parentElement;
+                            }
+                        }
+
+                        textToSearch = textToSearch.replace(/\s+/g, " ");
+
+                        // Salary patterns siêu rộng
                         let salary = "";
-                        const salaryMatch = fullText.match(/(\$\d{1,3}(?:,\d{3})*(?:\s*-\s*\$\d{1,3}(?:,\d{3})*)?)/);
-                        if (salaryMatch) salary = salaryMatch[0];
+                        const patterns = [
+                            /(\$\d{1,3}(?:,\d{3})*(?:\s*-\s*\$\d{1,3}(?:,\d{3})*)?)/,
+                            /(\d{2,3}k?\s*-\s*\d{2,3}k?)/i,
+                            /(\d{5,6}\s*-\s*\d{5,6})/,
+                            /USD\s*[\d,]+/i,
+                            /\$[\d,]+/ 
+                        ];
+
+                        for (const regex of patterns) {
+                            const match = textToSearch.match(regex);
+                            if (match && match[0].length > 4) {
+                                salary = match[0];
+                                break;
+                            }
+                        }
+
+                        if (!salary) return;
 
                         // Company
                         let company = "N/A";
-                        const companyEl = card.querySelector('a[data-cy*="company"], [class*="company"], .employer');
+                        const companyEl = link.closest('div').querySelector('a[data-cy*="company"], [class*="company"]');
                         if (companyEl) company = companyEl.textContent.trim();
 
                         jobs.push({
                             Title: title,
                             Company: company,
-                            Salary: salary || "",
+                            Salary: salary,
                             Location: "N/A",
                             Posted: "",
                             Link: fullLink,
@@ -131,14 +136,20 @@ async function runScraper() {
                         });
                     });
 
-                    return jobs;
+                    return { totalLinks: links.length, jobsWithSalary: jobs.length, sample: jobs.slice(0, 3) };
                 }, keyword);
 
-                console.log(`✅ Lấy được ${jobsOnPage.length} jobs cho "${keyword}"`);
-                allJobs = allJobs.concat(jobsOnPage);
+                console.log(`🔗 Tìm thấy ${result.totalLinks} link job`);
+                console.log(`💰 Tìm thấy ${result.jobsWithSalary} job có salary`);
+
+                if (result.sample && result.sample.length > 0) {
+                    console.log("📋 Sample jobs:", result.sample);
+                }
+
+                allJobs = allJobs.concat(result.sample || []);
 
                 await page.close();
-                if (jobsOnPage.length > 5) break;
+                if (result.jobsWithSalary > 0) break;
 
             } catch (error) {
                 console.log(`❌ Lỗi ${keyword} (Lần ${attempts}):`, error.message);
@@ -156,17 +167,14 @@ async function runScraper() {
         XLSX.utils.book_append_sheet(workbook, worksheet, "Jobs");
         XLSX.writeFile(workbook, fileName);
 
-        console.log(`📊 Đã lưu ${allJobs.length} jobs`);
+        console.log(`✅ Đã lưu ${allJobs.length} jobs`);
 
         const fileLink = await uploadToCatbox(fileName);
-
-        await Promise.all([
-            sendTelegramAlert(`✅ Dice.com: Tìm thấy ${allJobs.length} jobs!`),
-            sendTelegramFile(fileName),
-            sendToTeams(allJobs.length, fileLink)
-        ]);
+        await sendTelegramAlert(`✅ Dice.com: Tìm thấy ${allJobs.length} jobs có lương!`);
+        await sendTelegramFile(fileName);
     } else {
-        await sendTelegramAlert("❌ Không tìm thấy job nào.");
+        await sendTelegramAlert("❌ Vẫn không tìm thấy job có salary.");
+        console.log("❌ Không tìm thấy job nào có salary.");
     }
 }
 
