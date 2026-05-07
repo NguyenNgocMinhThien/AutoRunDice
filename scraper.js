@@ -129,7 +129,7 @@ async function runScraper() {
                 await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
                 await page.waitForTimeout(5000);
 
-                                const result = await page.evaluate((currentKeyword) => {
+                                    const result = await page.evaluate((currentKeyword) => {
                     const jobs = [];
                     const links = document.querySelectorAll('a[href*="/job-detail/"]');
 
@@ -139,61 +139,58 @@ async function runScraper() {
 
                         const fullLink = link.href.split('?')[0];
 
-                        // ================== TÌM THÔNG TIN TRONG CARD ==================
-                        let card = link.closest('div[class*="card"], article, section, li') || 
-                                   link.closest('div');
+                        // Tìm card chứa toàn bộ job (rộng hơn)
+                        let card = link.closest('div[class*="card"], article, li, section') || 
+                                   link.parentElement.parentElement || link.closest('div');
 
-                        let textToSearch = card ? card.textContent : document.body.textContent;
+                        let textToSearch = (card ? card.textContent : document.body.textContent) || "";
                         textToSearch = textToSearch.replace(/\s+/g, " ");
 
-                        // Salary
+                        // ================== SALARY (ưu tiên, nới lỏng lại) ==================
                         let salary = "";
                         const patterns = [
                             /(\$\d{1,3}(?:,\d{3})*(?:\s*-\s*\$\d{1,3}(?:,\d{3})*)?)/,
+                            /\$[\d,]+(?:\s*-\s*\$?[\d,]+)?/,
                             /(\d{2,3}k?\s*-\s*\d{2,3}k?)/i,
                             /(\d{5,6}\s*-\s*\d{5,6})/,
-                            /USD\s*[\d,]+/i,
-                            /\$[\d,]+/ 
+                            /USD\s*[\d,]+/i
                         ];
 
                         for (const regex of patterns) {
                             const match = textToSearch.match(regex);
                             if (match && match[0].length > 4) {
-                                salary = match[0];
+                                salary = match[0].trim();
+                                // Lọc một số noise phổ biến
+                                if (/^\d{2,3}-\d{2,3}$/.test(salary) && salary.length <= 6) continue;
                                 break;
                             }
                         }
 
-                        if (!salary) return;
+                        if (!salary) return;   // Chỉ lấy job có salary
 
                         // ================== COMPANY ==================
                         let company = "N/A";
                         const companySelectors = [
-                            'a[data-cy*="company"]',
-                            'a[href*="/company/"]',
-                            '[class*="Company"]',
-                            '[class*="company-name"]',
-                            'span[class*="employer"]'
+                            'a[data-cy*="company"]', 'a[href*="/company/"]', 
+                            '[class*="Company"]', '[class*="company-name"]',
+                            'span[class*="employer"]', 'div[class*="employer"]'
                         ];
 
                         for (const sel of companySelectors) {
                             const el = card.querySelector(sel);
                             if (el) {
-                                company = el.textContent.trim();
-                                if (company.length > 2 && !company.includes("Easy Apply")) break;
+                                const txt = el.textContent.trim();
+                                if (txt.length > 1 && !txt.includes("Easy Apply")) {
+                                    company = txt;
+                                    break;
+                                }
                             }
                         }
 
                         // ================== LOCATION ==================
                         let location = "N/A";
-                        const locationSelectors = [
-                            '[class*="location"]',
-                            'span[class*="metro"]',
-                            '.job-location',
-                            'div[class*="Location"]'
-                        ];
-
-                        for (const sel of locationSelectors) {
+                        const locSelectors = ['[class*="location"]', '[class*="Location"]', '.metro', 'span[class*="city"]'];
+                        for (const sel of locSelectors) {
                             const el = card.querySelector(sel);
                             if (el) {
                                 location = el.textContent.trim();
@@ -201,20 +198,14 @@ async function runScraper() {
                             }
                         }
 
-                        // ================== POSTED DATE ==================
+                        // ================== POSTED ==================
                         let posted = "";
-                        const postedSelectors = [
-                            '[class*="posted"]',
-                            'time',
-                            'span[class*="ago"]',
-                            'div[class*="date"]'
-                        ];
-
+                        const postedSelectors = ['[class*="posted"]', 'time', '[class*="ago"]', '[class*="date"]'];
                         for (const sel of postedSelectors) {
                             const el = card.querySelector(sel);
                             if (el) {
                                 posted = el.textContent.trim();
-                                if (posted.length > 3) break;
+                                if (posted.length > 2) break;
                             }
                         }
 
