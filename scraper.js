@@ -9,7 +9,7 @@ const require = createRequire(import.meta.url);
 
 const KEYWORDS = ["Analyst", "CFA", "CEO", "Data Science", "FP&A"];
 
-// --- HÀM UPLOAD + NOTIFICATION (giữ nguyên) ---
+// ====================== HÀM HỖ TRỢ ======================
 async function uploadToCatbox(filePath) {
     try {
         const form = new FormData();
@@ -22,7 +22,9 @@ async function uploadToCatbox(filePath) {
         });
 
         const fileLink = response.data.trim();
-        if (fileLink.includes('https://')) return fileLink;
+        if (fileLink.includes('https://')) {
+            return fileLink;
+        }
         throw new Error("Invalid link: " + fileLink);
     } catch (error) {
         console.error("❌ Lỗi Catbox:", error.message);
@@ -38,7 +40,13 @@ async function sendToTeams(totalJobs, fileLink) {
         "type": "AdaptiveCard",
         "version": "1.4",
         "body": [
-            { "type": "TextBlock", "text": "🚀 CẬP NHẬT JOB MỚI TẠI DICE.COM", "weight": "Bolder", "size": "Medium", "color": "Accent" },
+            { 
+                "type": "TextBlock", 
+                "text": "🚀 CẬP NHẬT JOB MỚI TẠI DICE.COM", 
+                "weight": "Bolder", 
+                "size": "Medium", 
+                "color": "Accent" 
+            },
             {
                 "type": "FactSet",
                 "facts": [
@@ -49,7 +57,11 @@ async function sendToTeams(totalJobs, fileLink) {
             }
         ],
         "actions": [
-            { "type": "Action.OpenUrl", "title": "📥 TẢI FILE EXCEL VỀ MÁY", "url": fileLink }
+            { 
+                "type": "Action.OpenUrl", 
+                "title": "📥 TẢI FILE EXCEL VỀ MÁY", 
+                "url": fileLink 
+            }
         ],
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json"
     };
@@ -96,92 +108,107 @@ async function sendTelegramFile(filePath) {
     }
 }
 
-// --- HÀM CHẠY CHÍNH CHO DICE.COM ---
+// ====================== HÀM CHÍNH ======================
 async function runScraper() {
     console.log("🚀 Khởi động Dice.com Scraper...");
 
     let allJobs = [];
 
-    for (const kw of KEYWORDS) {
-        // URL Dice.com (bạn có thể chỉnh location, radius, posted time...)
-        const targetUrl = `https://www.dice.com/jobs?q=${encodeURIComponent(kw)}&countryCode=US&radius=30&radiusUnit=mi&language=en&page=1&pageSize=100`;
+    const userAgents = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0"
+    ];
 
+    for (const keyword of KEYWORDS) {
         let attempts = 0;
-        const maxAttempts = 3;
+        const maxAttempts = 4;
 
         while (attempts < maxAttempts) {
             try {
                 attempts++;
-                console.log(`🔍 Quét: ${kw} (Lần ${attempts})...`);
+                console.log(`🔍 Quét từ khóa: ${keyword} (Lần ${attempts})...`);
+
+                const targetUrl = `https://www.dice.com/jobs?q=${encodeURIComponent(keyword)}&countryCode=US&radius=30&radiusUnit=mi&language=en&page=1&pageSize=50`;
 
                 const response = await axios.get('http://api.scraperapi.com', {
                     params: {
                         api_key: process.env.SCRAPER_API_KEY,
                         url: targetUrl,
-                        // country_code: 'us' // Dice chủ yếu US
+                        render: 'true',
+                        keep_headers: 'true'
                     },
-                    timeout: 60000
+                    headers: {
+                        'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)],
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                        'Accept-Language': 'en-US,en;q=0.9',
+                        'Referer': 'https://www.dice.com/'
+                    },
+                    timeout: 90000
                 });
 
                 const $ = cheerio.load(response.data);
                 let count = 0;
 
-                // Selector chính cho job card trên Dice (cập nhật theo cấu trúc hiện tại)
-                $('div[data-cy="search-card"], article, div[class*="job-card"]').each((i, el) => {
-                    const titleEl = $(el).find('a[data-cy="card-title-link"], h3 a, h2 a');
-                    const title = titleEl.text().trim();
+                // Lấy các thẻ chứa job
+                $('div[data-cy="search-card"], article, div[class*="JobCard"]').each((index, element) => {
+                    const titleElement = $(element).find('a[data-cy="card-title-link"], h3 a, h2 a').first();
+                    const title = titleElement.text().trim();
+
                     if (!title) return;
 
-                    const jobLink = titleEl.attr('href');
-                    const fullLink = jobLink ? (jobLink.startsWith('http') ? jobLink : `https://www.dice.com${jobLink}`) : 'N/A';
+                    let jobLink = titleElement.attr('href');
+                    const fullLink = jobLink && jobLink.startsWith('http') 
+                        ? jobLink 
+                        : `https://www.dice.com${jobLink}`;
 
-                    const company = $(el).find('[data-cy="company-name"], .company-name, .employer').text().trim() || "N/A";
-                    
-                    const location = $(el).find('[data-cy="location"], .location, .job-location').text().trim() || "N/A";
-
-                    // Salary
-                    let salary = $(el).find('[data-cy="salary"], .salary, .compensation').text().trim();
-                    salary = salary.replace(/\s+/g, ' ').trim();
-
-                    const postedTime = $(el).find('time, [data-cy="posted-time"]').text().trim() || "";
-
-                    const isEasyApply = $(el).find('button:contains("Easy Apply"), .easy-apply').length > 0;
+                    const company = $(element).find('[data-cy="company-name"], .company-name, .employer').text().trim() || "N/A";
+                    const location = $(element).find('[data-cy="location"], .location').text().trim() || "N/A";
+                    const salary = $(element).find('[data-cy="salary"], .salary, .compensation').text().trim() || "";
+                    const postedTime = $(element).find('time').text().trim() || "";
 
                     allJobs.push({
                         Title: title,
                         Company: company,
-                        Salary: salary || "",
+                        Salary: salary,
                         Location: location,
-                        'Posted': postedTime,
-                        'Apply Method': isEasyApply ? "Easy Apply" : "Standard",
+                        Posted: postedTime,
                         Link: fullLink,
-                        Keyword: kw
+                        Keyword: keyword
                     });
 
                     count++;
                 });
 
-                console.log(`✅ Lấy được ${count} jobs cho từ khóa "${kw}"`);
-                if (count > 0) break;
+                console.log(`✅ Lấy được ${count} jobs cho từ khóa "${keyword}"`);
 
-            } catch (err) {
-                console.log(`⚠️ Lỗi ${kw} (lần ${attempts}): ${err.message}`);
-                if (attempts < maxAttempts) {
-                    await new Promise(r => setTimeout(r, 7000));
+                if (count > 3) {
+                    break; // Thành công thì không thử lại
+                }
+
+            } catch (error) {
+                console.log(`❌ Lỗi ${keyword} (Lần ${attempts}): ${error.message}`);
+
+                if (error.response && error.response.status === 403) {
+                    console.log("🔄 Bị chặn 403 - Đang chờ lâu hơn...");
+                    await new Promise(resolve => setTimeout(resolve, 12000 + attempts * 6000));
+                } else {
+                    await new Promise(resolve => setTimeout(resolve, 8000));
                 }
             }
         }
     }
 
+    // ====================== LƯU FILE VÀ GỬI THÔNG BÁO ======================
     if (allJobs.length > 0) {
-        const fileName = `Dice_Jobs_Final.xlsx`; // hoặc thêm ngày: `Dice_Jobs_${new Date().toISOString().slice(0,10)}.xlsx`
+        const fileName = "Dice_Jobs_Final.xlsx";
 
         const worksheet = XLSX.utils.json_to_sheet(allJobs);
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, "Jobs");
         XLSX.writeFile(workbook, fileName);
 
-        console.log(`📊 Đã lưu ${allJobs.length} jobs vào ${fileName}`);
+        console.log(`📊 Đã lưu ${allJobs.length} jobs vào file ${fileName}`);
 
         const fileLink = await uploadToCatbox(fileName);
 
@@ -191,10 +218,10 @@ async function runScraper() {
             sendToTeams(allJobs.length, fileLink)
         ]);
 
-        console.log("🏁 Hoàn tất!");
+        console.log("🏁 Hoàn tất scraper Dice.com!");
     } else {
         console.log("❌ Không tìm thấy job nào.");
-        await sendTelegramAlert("❌ Không tìm thấy job mới nào trên Dice.");
+        await sendTelegramAlert("❌ Không tìm thấy job mới nào trên Dice.com.");
     }
 }
 
