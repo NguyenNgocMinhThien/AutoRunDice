@@ -52,7 +52,7 @@ async function sendTelegramFile(filePath) {
 
 // ====================== HÀM CHÍNH ======================
 async function runScraper() {
-    console.log("🚀 Khởi động Dice.com Scraper (Salary Ultra Mode)...");
+    console.log("🚀 Khởi động Dice.com Scraper (Ultra Salary Mode)...");
 
     const browser = await chromium.launch({ headless: true });
     let allJobs = [];
@@ -71,7 +71,7 @@ async function runScraper() {
 
                 const url = `https://www.dice.com/jobs?q=${encodeURIComponent(keyword)}&countryCode=US&radius=30&radiusUnit=mi&language=en&page=1&pageSize=50`;
                 await page.goto(url, { waitUntil: 'networkidle', timeout: 90000 });
-                await page.waitForTimeout(12000);
+                await page.waitForTimeout(15000);
 
                 await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
                 await page.waitForTimeout(5000);
@@ -86,23 +86,33 @@ async function runScraper() {
 
                         const fullLink = link.href;
 
-                        // Lấy text rộng nhất có thể
-                        let card = link.closest('div') || link.parentElement || document.body;
-                        let fullText = (card.textContent || card.innerText || "").replace(/\s+/g, " ");
+                        // Tìm vùng chứa salary rộng nhất
+                        let textToSearch = document.body.textContent || "";
 
-                        // === SALARY DETECTION SIÊU RỘNG ===
+                        // Hoặc thu hẹp quanh link
+                        let parent = link.parentElement;
+                        for (let i = 0; i < 8; i++) {
+                            if (parent) {
+                                textToSearch = parent.textContent || textToSearch;
+                                parent = parent.parentElement;
+                            }
+                        }
+
+                        textToSearch = textToSearch.replace(/\s+/g, " ");
+
+                        // Salary patterns siêu rộng
                         let salary = "";
-                        const salaryRegexes = [
+                        const patterns = [
                             /(\$\d{1,3}(?:,\d{3})*(?:\s*-\s*\$\d{1,3}(?:,\d{3})*)?)/,
                             /(\d{2,3}k?\s*-\s*\d{2,3}k?)/i,
                             /(\d{5,6}\s*-\s*\d{5,6})/,
-                            /USD\s*\d+/i,
-                            /\$\d+/ 
+                            /USD\s*[\d,]+/i,
+                            /\$[\d,]+/ 
                         ];
 
-                        for (const regex of salaryRegexes) {
-                            const match = fullText.match(regex);
-                            if (match && match[0].length > 3) {
+                        for (const regex of patterns) {
+                            const match = textToSearch.match(regex);
+                            if (match && match[0].length > 4) {
                                 salary = match[0];
                                 break;
                             }
@@ -112,14 +122,8 @@ async function runScraper() {
 
                         // Company
                         let company = "N/A";
-                        const companyEl = card.querySelector('a[data-cy*="company"], [class*="company"]');
+                        const companyEl = link.closest('div').querySelector('a[data-cy*="company"], [class*="company"]');
                         if (companyEl) company = companyEl.textContent.trim();
-
-                        if (company === "N/A") {
-                            const afterTitle = fullText.substring(fullText.indexOf(title) + title.length, fullText.indexOf(title) + title.length + 150);
-                            const compMatch = afterTitle.match(/([A-Za-z0-9\s&.,'-]{5,70})/);
-                            if (compMatch) company = compMatch[1].trim();
-                        }
 
                         jobs.push({
                             Title: title,
@@ -132,14 +136,14 @@ async function runScraper() {
                         });
                     });
 
-                    return { totalLinks: links.length, jobsWithSalary: jobs.length, sample: jobs.slice(0, 2) };
+                    return { totalLinks: links.length, jobsWithSalary: jobs.length, sample: jobs.slice(0, 3) };
                 }, keyword);
 
                 console.log(`🔗 Tìm thấy ${result.totalLinks} link job`);
                 console.log(`💰 Tìm thấy ${result.jobsWithSalary} job có salary`);
 
                 if (result.sample && result.sample.length > 0) {
-                    console.log("📋 Sample:", result.sample);
+                    console.log("📋 Sample jobs:", result.sample);
                 }
 
                 allJobs = allJobs.concat(result.sample || []);
