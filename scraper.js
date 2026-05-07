@@ -30,24 +30,18 @@ async function uploadToCatbox(filePath) {
 async function sendToTeams(totalJobs, fileLink) {
     const webhookUrl = process.env.TEAMS_WEBHOOK_URL;
     if (!webhookUrl) return;
-
     const adaptiveCard = {
         "type": "AdaptiveCard", "version": "1.4",
-        "body": [
-            { "type": "TextBlock", "text": "🚀 CẬP NHẬT JOB MỚI TẠI DICE.COM", "weight": "Bolder", "size": "Medium", "color": "Accent" },
-            { "type": "FactSet", "facts": [
-                { "title": "Nguồn:", "value": "Dice.com" },
-                { "title": "Số lượng:", "value": `${totalJobs} jobs` },
-                { "title": "Trạng thái:", "value": "Đã sẵn sàng ✅" }
-            ]}
-        ],
+        "body": [{ "type": "TextBlock", "text": "🚀 CẬP NHẬT JOB MỚI TẠI DICE.COM", "weight": "Bolder", "size": "Medium", "color": "Accent" },
+                 { "type": "FactSet", "facts": [
+                     { "title": "Nguồn:", "value": "Dice.com" },
+                     { "title": "Số lượng:", "value": `${totalJobs} jobs` },
+                     { "title": "Trạng thái:", "value": "Đã sẵn sàng ✅" }
+                 ]}],
         "actions": [{ "type": "Action.OpenUrl", "title": "📥 TẢI FILE EXCEL", "url": fileLink }],
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json"
     };
-
-    try {
-        await axios.post(webhookUrl, adaptiveCard);
-    } catch (error) {}
+    try { await axios.post(webhookUrl, adaptiveCard); } catch (e) {}
 }
 
 async function sendTelegramAlert(message) {
@@ -75,7 +69,7 @@ async function sendTelegramFile(filePath) {
 
 // ====================== HÀM CHÍNH ======================
 async function runScraper() {
-    console.log("🚀 Khởi động Dice.com Scraper bằng Playwright...");
+    console.log("🚀 Khởi động Dice.com Scraper...");
 
     const browser = await chromium.launch({ headless: true });
     let allJobs = [];
@@ -93,50 +87,47 @@ async function runScraper() {
                 await page.setViewportSize({ width: 1920, height: 1080 });
 
                 const url = `https://www.dice.com/jobs?q=${encodeURIComponent(keyword)}&countryCode=US&radius=30&radiusUnit=mi&language=en&page=1&pageSize=50`;
-                
-                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-                await page.waitForTimeout(8000); // Chờ load động
+                await page.goto(url, { waitUntil: 'networkidle', timeout: 90000 });
+                await page.waitForTimeout(10000); // Chờ load đầy đủ
 
                 const jobsOnPage = await page.evaluate((currentKeyword) => {
                     const jobs = [];
-                    // Selector rộng hơn để bắt tất cả job cards
-                    const cards = document.querySelectorAll('a[href*="/job-detail/"], div[class*="card"], article');
+                    const jobLinks = document.querySelectorAll('a[href*="/job-detail/"]');
 
-                    cards.forEach(card => {
-                        const titleLink = card.closest('a[href*="/job-detail/"]') || card.querySelector('a[href*="/job-detail/"]');
-                        if (!titleLink) return;
+                    jobLinks.forEach(link => {
+                        const title = link.textContent.trim();
+                        if (!title || title.length < 8) return;
 
-                        const title = titleLink.textContent.trim();
-                        if (!title || title.length < 5) return;
+                        const fullLink = link.href;
 
-                        const link = titleLink.href;
-
-                        let company = "N/A";
-                        let location = "N/A";
-                        let salary = "";
-                        let posted = "";
-
-                        // Tìm các thông tin xung quanh
-                        const parent = card.closest('div') || card.parentElement;
-                        if (parent) {
-                            const text = parent.textContent || "";
-
-                            // Company
-                            const companyMatch = text.match(/([A-Za-z\s&.,-]+?)(?=\s+(?:Highland|Atlanta|Houston|Remote|Today|Yesterday|\d+d ago))/);
-                            if (companyMatch) company = companyMatch[1].trim();
-
-                            // Location
-                            const locMatch = text.match(/(Highland|Atlanta|Houston|Remote|San Antonio|Tampa|Detroit|New York|Chicago|California|Texas|Florida)[^,\n]*/i);
-                            if (locMatch) location = locMatch[0].trim();
-
-                            // Salary
-                            const salaryMatch = text.match(/(\$\d{1,3}(?:,\d{3})*(?:\s*-\s*\$\d{1,3}(?:,\d{3})*)?)/);
-                            if (salaryMatch) salary = salaryMatch[0];
-
-                            // Posted time
-                            const postedMatch = text.match(/(Today|Yesterday|\d+\s*d\s*ago|\d+\s*h\s*ago)/i);
-                            if (postedMatch) posted = postedMatch[0];
+                        // Lấy container lớn chứa toàn bộ thông tin job
+                        let container = link.closest('div') || link.parentElement;
+                        while (container && !container.textContent.includes('Today') && !container.textContent.includes('ago')) {
+                            container = container.parentElement;
                         }
+                        if (!container) container = link.closest('article') || document.body;
+
+                        const fullText = container.textContent || "";
+
+                        // Extract Company (thường nằm sau title)
+                        let company = "N/A";
+                        const companyMatch = fullText.match(new RegExp(title.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&') + '\\s*([A-Za-z0-9\\s&.,-]+?)(?=\\s+(?:Highland|Atlanta|Houston|Remote|Today|Yesterday|\\d+d ago))'));
+                        if (companyMatch && companyMatch[1]) company = companyMatch[1].trim();
+
+                        // Location
+                        let location = "N/A";
+                        const locMatch = fullText.match(/(Highland|Atlanta|Houston|San Antonio|Tampa|Detroit|New York|Chicago|Remote|California|Texas|Florida|New Jersey|Michigan|Utah|Missouri)[^,\n•]*/i);
+                        if (locMatch) location = locMatch[0].trim();
+
+                        // Salary
+                        let salary = "";
+                        const salaryMatch = fullText.match(/(\$\d{1,3}(?:,\d{3})*(?:\s*-\s*\$\d{1,3}(?:,\d{3})*)?)/);
+                        if (salaryMatch) salary = salaryMatch[0];
+
+                        // Posted
+                        let posted = "";
+                        const postedMatch = fullText.match(/(Today|Yesterday|\d+\s*d\s*ago|\d+\s*h\s*ago)/i);
+                        if (postedMatch) posted = postedMatch[0];
 
                         jobs.push({
                             Title: title,
@@ -144,7 +135,7 @@ async function runScraper() {
                             Salary: salary,
                             Location: location,
                             Posted: posted,
-                            Link: link,
+                            Link: fullLink,
                             Keyword: currentKeyword
                         });
                     });
@@ -156,11 +147,11 @@ async function runScraper() {
                 allJobs = allJobs.concat(jobsOnPage);
 
                 await page.close();
-                if (jobsOnPage.length > 3) break;
+                if (jobsOnPage.length > 5) break;
 
             } catch (error) {
                 console.log(`❌ Lỗi ${keyword} (Lần ${attempts}):`, error.message);
-                await new Promise(r => setTimeout(r, 10000));
+                await new Promise(r => setTimeout(r, 15000));
             }
         }
     }
@@ -174,7 +165,7 @@ async function runScraper() {
         XLSX.utils.book_append_sheet(workbook, worksheet, "Jobs");
         XLSX.writeFile(workbook, fileName);
 
-        console.log(`📊 Đã lưu ${allJobs.length} jobs vào ${fileName}`);
+        console.log(`📊 Đã lưu ${allJobs.length} jobs`);
 
         const fileLink = await uploadToCatbox(fileName);
 
