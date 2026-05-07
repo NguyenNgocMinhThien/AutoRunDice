@@ -129,7 +129,7 @@ async function runScraper() {
                 await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
                 await page.waitForTimeout(5000);
 
-                const result = await page.evaluate((currentKeyword) => {
+                                const result = await page.evaluate((currentKeyword) => {
                     const jobs = [];
                     const links = document.querySelectorAll('a[href*="/job-detail/"]');
 
@@ -137,20 +137,16 @@ async function runScraper() {
                         const title = link.textContent.trim();
                         if (!title || title.length < 10) return;
 
-                        const fullLink = link.href;
+                        const fullLink = link.href.split('?')[0];
 
-                        let textToSearch = document.body.textContent || "";
+                        // ================== TÌM THÔNG TIN TRONG CARD ==================
+                        let card = link.closest('div[class*="card"], article, section, li') || 
+                                   link.closest('div');
 
-                        let parent = link.parentElement;
-                        for (let i = 0; i < 8; i++) {
-                            if (parent) {
-                                textToSearch = parent.textContent || textToSearch;
-                                parent = parent.parentElement;
-                            }
-                        }
-
+                        let textToSearch = card ? card.textContent : document.body.textContent;
                         textToSearch = textToSearch.replace(/\s+/g, " ");
 
+                        // Salary
                         let salary = "";
                         const patterns = [
                             /(\$\d{1,3}(?:,\d{3})*(?:\s*-\s*\$\d{1,3}(?:,\d{3})*)?)/,
@@ -170,22 +166,74 @@ async function runScraper() {
 
                         if (!salary) return;
 
+                        // ================== COMPANY ==================
                         let company = "N/A";
-                        const companyEl = link.closest('div').querySelector('a[data-cy*="company"], [class*="company"]');
-                        if (companyEl) company = companyEl.textContent.trim();
+                        const companySelectors = [
+                            'a[data-cy*="company"]',
+                            'a[href*="/company/"]',
+                            '[class*="Company"]',
+                            '[class*="company-name"]',
+                            'span[class*="employer"]'
+                        ];
+
+                        for (const sel of companySelectors) {
+                            const el = card.querySelector(sel);
+                            if (el) {
+                                company = el.textContent.trim();
+                                if (company.length > 2 && !company.includes("Easy Apply")) break;
+                            }
+                        }
+
+                        // ================== LOCATION ==================
+                        let location = "N/A";
+                        const locationSelectors = [
+                            '[class*="location"]',
+                            'span[class*="metro"]',
+                            '.job-location',
+                            'div[class*="Location"]'
+                        ];
+
+                        for (const sel of locationSelectors) {
+                            const el = card.querySelector(sel);
+                            if (el) {
+                                location = el.textContent.trim();
+                                if (location.length > 3) break;
+                            }
+                        }
+
+                        // ================== POSTED DATE ==================
+                        let posted = "";
+                        const postedSelectors = [
+                            '[class*="posted"]',
+                            'time',
+                            'span[class*="ago"]',
+                            'div[class*="date"]'
+                        ];
+
+                        for (const sel of postedSelectors) {
+                            const el = card.querySelector(sel);
+                            if (el) {
+                                posted = el.textContent.trim();
+                                if (posted.length > 3) break;
+                            }
+                        }
 
                         jobs.push({
                             Title: title,
                             Company: company,
                             Salary: salary,
-                            Location: "N/A",
-                            Posted: "",
+                            Location: location,
+                            Posted: posted,
                             Link: fullLink,
                             Keyword: currentKeyword
                         });
                     });
 
-                    return { totalLinks: links.length, jobsWithSalary: jobs.length, sample: jobs.slice(0, 3) };
+                    return { 
+                        totalLinks: links.length, 
+                        jobsWithSalary: jobs.length, 
+                        sample: jobs.slice(0, 5) 
+                    };
                 }, keyword);
 
                 console.log(`🔗 Tìm thấy ${result.totalLinks} link job`);
