@@ -27,25 +27,6 @@ async function uploadToCatbox(filePath) {
     }
 }
 
-async function sendToTeams(totalJobs, fileLink) {
-    const webhookUrl = process.env.TEAMS_WEBHOOK_URL;
-    if (!webhookUrl) return;
-    const adaptiveCard = {
-        "type": "AdaptiveCard", "version": "1.4",
-        "body": [
-            { "type": "TextBlock", "text": "🚀 CẬP NHẬT JOB MỚI TẠI DICE.COM", "weight": "Bolder", "size": "Medium", "color": "Accent" },
-            { "type": "FactSet", "facts": [
-                { "title": "Nguồn:", "value": "Dice.com" },
-                { "title": "Số lượng:", "value": `${totalJobs} jobs` },
-                { "title": "Trạng thái:", "value": "Đã sẵn sàng ✅" }
-            ]}
-        ],
-        "actions": [{ "type": "Action.OpenUrl", "title": "📥 TẢI FILE EXCEL", "url": fileLink }],
-        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json"
-    };
-    try { await axios.post(webhookUrl, adaptiveCard); } catch (e) {}
-}
-
 async function sendTelegramAlert(message) {
     const botToken = process.env.TELEGRAM_TOKEN;
     const chatId = process.env.TELEGRAM_CHAT_ID;
@@ -69,9 +50,15 @@ async function sendTelegramFile(filePath) {
     } catch (e) {}
 }
 
+async function sendToTeams(totalJobs, fileLink) {
+    const webhookUrl = process.env.TEAMS_WEBHOOK_URL;
+    if (!webhookUrl) return;
+    // Có thể thêm card sau nếu cần
+}
+
 // ====================== HÀM CHÍNH ======================
 async function runScraper() {
-    console.log("🚀 Khởi động Dice.com Scraper...");
+    console.log("🚀 Khởi động Dice.com Scraper (Debug + Scroll)...");
 
     const browser = await chromium.launch({ headless: true });
     let allJobs = [];
@@ -90,70 +77,80 @@ async function runScraper() {
 
                 const url = `https://www.dice.com/jobs?q=${encodeURIComponent(keyword)}&countryCode=US&radius=30&radiusUnit=mi&language=en&page=1&pageSize=50`;
                 await page.goto(url, { waitUntil: 'networkidle', timeout: 90000 });
-                await page.waitForTimeout(10000); // Chờ JavaScript load
 
-                const jobsOnPage = await page.evaluate((currentKeyword) => {
+                await page.waitForTimeout(15000); // Chờ lâu
+
+                // Scroll xuống để load hết
+                await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+                await page.waitForTimeout(5000);
+
+                const result = await page.evaluate((currentKeyword) => {
                     const jobs = [];
                     const links = document.querySelectorAll('a[href*="/job-detail/"]');
 
+                    console.log(`Tìm thấy ${links.length} link job`);
+
                     links.forEach(link => {
                         const title = link.textContent.trim();
-                        if (!title || title.length < 8) return;
+                        if (!title || title.length < 10) return;
 
                         const fullLink = link.href;
 
-                        // Lấy text của toàn bộ card chứa job
-                        let card = link.closest('div') || link.parentElement;
-                        let fullText = card ? card.textContent : "";
+                        let card = link.closest('div') || link.parentElement || document.body;
+                        const fullText = card.textContent || card.innerText || "";
 
-                        // Tìm salary với nhiều pattern
+                        // Debug salary
                         let salary = "";
-                        const salaryRegex = /(\$\d{1,3}(?:,\d{3})*(?:\s*-\s*\$\d{1,3}(?:,\d{3})*)?)|(\d{1,3}k?\s*-\s*\d{1,3}k?)|(USD\d+)|(\d{2,3}\s*-\s*\d{2,3})/i;
-                        const salaryMatch = fullText.match(salaryRegex);
-                        if (salaryMatch) salary = salaryMatch[0];
+                        const salaryPatterns = [
+                            /(\$\d{1,3}(?:,\d{3})*(?:\s*-\s*\$\d{1,3}(?:,\d{3})*)?)/,
+                            /(\d{2,3}k?\s*-\s*\d{2,3}k?)/i,
+                            /(\d{5,6}\s*-\s*\d{5,6})/,
+                            /USD\s*(\d+)/i
+                        ];
 
-                        // Chỉ lấy job có salary
+                        for (const regex of salaryPatterns) {
+                            const m = fullText.match(regex);
+                            if (m) {
+                                salary = m[0];
+                                break;
+                            }
+                        }
+
                         if (!salary) return;
 
                         // Company
                         let company = "N/A";
-                        const afterTitle = fullText.substring(fullText.indexOf(title) + title.length, fullText.indexOf(title) + title.length + 200);
-                        const companyMatch = afterTitle.match(/^[\s•]*([A-Za-z0-9\s&.,'-]{5,70})/);
-                        if (companyMatch) company = companyMatch[1].trim();
-
-                        // Location
-                        let location = "N/A";
-                        const locMatch = fullText.match(/(Highland|Atlanta|Houston|San Antonio|Tampa|Detroit|New York|Chicago|Remote|California|Texas|Florida|New Jersey|Michigan|Utah|Missouri|Iowa)[^,\n•]*/i);
-                        if (locMatch) location = locMatch[0].trim();
-
-                        // Posted
-                        let posted = "";
-                        const postedMatch = fullText.match(/(Today|Yesterday|\d+\s*d\s*ago|\d+\s*h\s*ago)/i);
-                        if (postedMatch) posted = postedMatch[0];
+                        const after = fullText.substring(fullText.indexOf(title) + title.length).trim().substring(0, 120);
+                        const compMatch = after.match(/^[\s•-]*([A-Za-z0-9\s&.,'-]{5,70})/);
+                        if (compMatch) company = compMatch[1].trim();
 
                         jobs.push({
                             Title: title,
                             Company: company,
                             Salary: salary,
-                            Location: location,
-                            Posted: posted,
+                            Location: "N/A",
+                            Posted: "",
                             Link: fullLink,
                             Keyword: currentKeyword
                         });
                     });
 
-                    return jobs;
+                    return { count: jobs.length, jobs: jobs.slice(0, 5) }; // Trả về 5 job đầu để debug
                 }, keyword);
 
-                console.log(`✅ Lấy được ${jobsOnPage.length} jobs có lương cho "${keyword}"`);
-                allJobs = allJobs.concat(jobsOnPage);
+                console.log(`✅ Tìm thấy ${result.count} jobs có salary cho "${keyword}"`);
+                if (result.count > 0) {
+                    console.log("📋 Sample jobs:", result.jobs);
+                }
+
+                allJobs = allJobs.concat(result.jobs || []);
 
                 await page.close();
-                if (jobsOnPage.length > 3) break;
+                if (result.count > 0) break;
 
             } catch (error) {
                 console.log(`❌ Lỗi ${keyword} (Lần ${attempts}):`, error.message);
-                await new Promise(r => setTimeout(r, 12000));
+                await new Promise(r => setTimeout(r, 15000));
             }
         }
     }
@@ -167,17 +164,17 @@ async function runScraper() {
         XLSX.utils.book_append_sheet(workbook, worksheet, "Jobs");
         XLSX.writeFile(workbook, fileName);
 
-        console.log(`📊 Đã lưu ${allJobs.length} jobs có lương`);
+        console.log(`📊 Đã lưu ${allJobs.length} jobs`);
 
         const fileLink = await uploadToCatbox(fileName);
 
         await Promise.all([
             sendTelegramAlert(`✅ Dice.com: Tìm thấy ${allJobs.length} jobs có lương!`),
-            sendTelegramFile(fileName),
-            sendToTeams(allJobs.length, fileLink)
+            sendTelegramFile(fileName)
         ]);
     } else {
-        await sendTelegramAlert("❌ Không tìm thấy job có salary nào trên Dice.com.");
+        await sendTelegramAlert("❌ Không tìm thấy job có salary nào.");
+        console.log("❌ Không tìm thấy job nào có salary.");
     }
 }
 
