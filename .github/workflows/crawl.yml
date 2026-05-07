@@ -24,9 +24,9 @@ jobs:
 
         # === THÊM ĐOẠN NÀY ===
       - name: Install Playwright Browsers
-        run: npx playwright install --with-deps
+        uses: microsoft/playwright-github-action@v1
       # =====================
-      
+
       - name: Chay Script
         env:
           SCRAPER_API_KEY: ${{ secrets.SCRAPER_API_KEY }}
