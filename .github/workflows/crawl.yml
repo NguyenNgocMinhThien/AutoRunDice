@@ -22,6 +22,11 @@ jobs:
       - name: Install dependencies
         run: npm install axios xlsx cheerio form-data
 
+        # === THÊM ĐOẠN NÀY ===
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps
+      # =====================
+      
       - name: Chay Script
         env:
           SCRAPER_API_KEY: ${{ secrets.SCRAPER_API_KEY }}
