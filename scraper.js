@@ -18,12 +18,12 @@ async function uploadToCatbox(filePath) {
 
             const form = new FormData();
             form.append('reqtype', 'fileupload');
-            form.append('time', '72h');                    // Tăng thời gian giữ file
+            form.append('time', '72h');
             form.append('fileToUpload', fs.createReadStream(filePath));
 
             const response = await axios.post('https://litterbox.catbox.moe/resources/internals/api.php', form, {
                 headers: form.getHeaders(),
-                timeout: 45000,                            // Tăng timeout
+                timeout: 45000,
                 maxBodyLength: Infinity,
                 maxContentLength: Infinity
             });
@@ -33,20 +33,46 @@ async function uploadToCatbox(filePath) {
                 console.log("✅ Upload Catbox thành công!");
                 return fileLink;
             }
-            
-            console.log("⚠️ Catbox trả về link không hợp lệ");
         } catch (error) {
             console.error(`❌ Lỗi Catbox (Lần ${attempts}):`, error.message);
             if (attempts < maxAttempts) {
-                await new Promise(r => setTimeout(r, 5000)); // Chờ 5s trước khi thử lại
+                await new Promise(r => setTimeout(r, 5000));
             }
         }
     }
-    
     console.error("❌ Catbox upload thất bại sau 3 lần thử");
-    return "https://github.com"; // fallback
+    return null;
 }
 
+// ==================== MICROSOFT TEAMS ====================
+async function sendTeamsAlert(message, fileLink = null) {
+    const webhookUrl = process.env.TEAMS_WEBHOOK_URL;
+    if (!webhookUrl) return;
+
+    try {
+        const payload = {
+            "@type": "MessageCard",
+            "@context": "http://schema.org/extensions",
+            "themeColor": "0076D7",
+            "summary": "Dice.com Scraper Report",
+            "sections": [{
+                "activityTitle": "🎯 Dice.com Scraper",
+                "activitySubtitle": "Ultra Salary Mode",
+                "facts": [
+                    { "name": "Số job tìm thấy:", "value": message },
+                ],
+                "text": fileLink ? `🔗 File: ${fileLink}` : ""
+            }]
+        };
+
+        await axios.post(webhookUrl, payload);
+        console.log("✅ Đã gửi thông báo lên Microsoft Teams");
+    } catch (e) {
+        console.error("❌ Lỗi gửi Teams:", e.message);
+    }
+}
+
+// ====================== TELEGRAM ======================
 async function sendTelegramAlert(message) {
     const botToken = process.env.TELEGRAM_TOKEN;
     const chatId = process.env.TELEGRAM_CHAT_ID;
@@ -75,12 +101,14 @@ async function sendTelegramFile(filePath) {
     } catch (e) {}
 }
 
-// ====================== PHẦN CÒN LẠI GIỮ NGUYÊN ======================
+// ====================== HÀM CHÍNH ======================
 async function runScraper() {
     console.log("🚀 Khởi động Dice.com Scraper (Ultra Salary Mode)...");
 
     const browser = await chromium.launch({ headless: true });
     let allJobs = [];
+
+    // ... (phần scrape giữ nguyên hoàn toàn như code cũ của bạn)
 
     for (const keyword of KEYWORDS) {
         let attempts = 0;
@@ -191,10 +219,15 @@ async function runScraper() {
         console.log(`✅ Đã lưu ${allJobs.length} jobs`);
 
         const fileLink = await uploadToCatbox(fileName);
-        await sendTelegramAlert(`✅ Dice.com: Tìm thấy ${allJobs.length} jobs có lương!`);
+
+        const alertMsg = `✅ Dice.com: Tìm thấy ${allJobs.length} jobs có lương!`;
+
+        await sendTelegramAlert(alertMsg);
+        await sendTeamsAlert(allJobs.length + " jobs", fileLink);   // ← Thêm dòng này
         await sendTelegramFile(fileName);
     } else {
         await sendTelegramAlert("❌ Vẫn không tìm thấy job có salary.");
+        await sendTeamsAlert("0 jobs");   // ← Thêm dòng này
         console.log("❌ Không tìm thấy job nào có salary.");
     }
 }
