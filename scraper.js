@@ -90,7 +90,7 @@ async function runScraper() {
 
                 const url = `https://www.dice.com/jobs?q=${encodeURIComponent(keyword)}&countryCode=US&radius=30&radiusUnit=mi&language=en&page=1&pageSize=50`;
                 await page.goto(url, { waitUntil: 'networkidle', timeout: 90000 });
-                await page.waitForTimeout(8000);
+                await page.waitForTimeout(10000); // Chờ JavaScript load
 
                 const jobsOnPage = await page.evaluate((currentKeyword) => {
                     const jobs = [];
@@ -102,28 +102,24 @@ async function runScraper() {
 
                         const fullLink = link.href;
 
-                        let container = link.closest('div') || link.parentElement;
-                        const fullText = container ? container.textContent : "";
+                        // Lấy text của toàn bộ card chứa job
+                        let card = link.closest('div') || link.parentElement;
+                        let fullText = card ? card.textContent : "";
 
-                        // === LẤY COMPANY ===
-                        let company = "N/A";
-                        const afterTitle = fullText.substring(fullText.indexOf(title) + title.length).trim();
-                        const companyMatch = afterTitle.match(/^([A-Za-z0-9\s&.,'-]+?)(?=\s+(?:Highland|Atlanta|Houston|Remote|Today|Yesterday|\d+d ago|\d+h ago))/);
-                        if (companyMatch && companyMatch[1]) {
-                            company = companyMatch[1].trim();
-                        }
-                        if (company === "N/A") {
-                            const altMatch = fullText.match(/([A-Za-z\s&.,'-]{8,60}?)(?=\s+(?:Highland|Atlanta|Houston|Remote|Today|Yesterday|\d+d ago))/);
-                            if (altMatch) company = altMatch[1].trim();
-                        }
-
-                        // === LẤY SALARY (Quan trọng nhất) ===
+                        // Tìm salary với nhiều pattern
                         let salary = "";
-                        const salaryMatch = fullText.match(/(\$\d{1,3}(?:,\d{3})*(?:\s*-\s*\$\d{1,3}(?:,\d{3})*)?)/);
+                        const salaryRegex = /(\$\d{1,3}(?:,\d{3})*(?:\s*-\s*\$\d{1,3}(?:,\d{3})*)?)|(\d{1,3}k?\s*-\s*\d{1,3}k?)|(USD\d+)|(\d{2,3}\s*-\s*\d{2,3})/i;
+                        const salaryMatch = fullText.match(salaryRegex);
                         if (salaryMatch) salary = salaryMatch[0];
 
-                        // === CHỈ LẤY JOB CÓ SALARY ===
-                        if (!salary) return;   // Bỏ qua job không có lương
+                        // Chỉ lấy job có salary
+                        if (!salary) return;
+
+                        // Company
+                        let company = "N/A";
+                        const afterTitle = fullText.substring(fullText.indexOf(title) + title.length, fullText.indexOf(title) + title.length + 200);
+                        const companyMatch = afterTitle.match(/^[\s•]*([A-Za-z0-9\s&.,'-]{5,70})/);
+                        if (companyMatch) company = companyMatch[1].trim();
 
                         // Location
                         let location = "N/A";
@@ -157,7 +153,7 @@ async function runScraper() {
 
             } catch (error) {
                 console.log(`❌ Lỗi ${keyword} (Lần ${attempts}):`, error.message);
-                await new Promise(r => setTimeout(r, 10000));
+                await new Promise(r => setTimeout(r, 12000));
             }
         }
     }
@@ -171,7 +167,7 @@ async function runScraper() {
         XLSX.utils.book_append_sheet(workbook, worksheet, "Jobs");
         XLSX.writeFile(workbook, fileName);
 
-        console.log(`📊 Đã lưu ${allJobs.length} jobs có salary`);
+        console.log(`📊 Đã lưu ${allJobs.length} jobs có lương`);
 
         const fileLink = await uploadToCatbox(fileName);
 
