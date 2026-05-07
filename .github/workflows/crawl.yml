@@ -1,0 +1,37 @@
+name: Daily Job Scraper
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # Chạy tự động vào 2h sáng UTC mỗi ngày
+  workflow_dispatch: # Cho phép bấm chạy thủ công trên Github
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install axios xlsx cheerio form-data
+
+      - name: Chay Script
+        env:
+          SCRAPER_API_KEY: ${{ secrets.SCRAPER_API_KEY }}
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: node scraper.js
+
+      - name: Upload Excel Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Dice-Jobs-Excel
+          # Sử dụng dấu * để lấy đúng file Dice_Jobs kèm ngày tháng hiện tại
+          path: Dice_Jobs_*.xlsx
