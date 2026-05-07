@@ -47,10 +47,7 @@ async function sendToTeams(totalJobs, fileLink) {
 
     try {
         await axios.post(webhookUrl, adaptiveCard);
-        console.log("✅ [Teams] Đã gửi Card thành công!");
-    } catch (error) {
-        console.error("❌ [Teams] Lỗi:", error.message);
-    }
+    } catch (error) {}
 }
 
 async function sendTelegramAlert(message) {
@@ -61,7 +58,7 @@ async function sendTelegramAlert(message) {
         await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             chat_id: chatId, text: message, parse_mode: 'HTML'
         });
-    } catch (e) { console.error("❌ Telegram Alert Error:", e.message); }
+    } catch (e) {}
 }
 
 async function sendTelegramFile(filePath) {
@@ -73,7 +70,7 @@ async function sendTelegramFile(filePath) {
     form.append('document', fs.createReadStream(filePath));
     try {
         await axios.post(`https://api.telegram.org/bot${botToken}/sendDocument`, form, { headers: form.getHeaders() });
-    } catch (e) { console.error("❌ Telegram File Error:", e.message); }
+    } catch (e) {}
 }
 
 // ====================== HÀM CHÍNH ======================
@@ -96,43 +93,50 @@ async function runScraper() {
                 await page.setViewportSize({ width: 1920, height: 1080 });
 
                 const url = `https://www.dice.com/jobs?q=${encodeURIComponent(keyword)}&countryCode=US&radius=30&radiusUnit=mi&language=en&page=1&pageSize=50`;
-                await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
-
-                // Chờ job cards load
-                await page.waitForSelector('a[href*="/job-detail/"]', { timeout: 30000 }).catch(() => {});
+                
+                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+                await page.waitForTimeout(8000); // Chờ load động
 
                 const jobsOnPage = await page.evaluate((currentKeyword) => {
                     const jobs = [];
-                    const cards = document.querySelectorAll('div[class*="card"], article, div[data-cy="search-card"]');
+                    // Selector rộng hơn để bắt tất cả job cards
+                    const cards = document.querySelectorAll('a[href*="/job-detail/"], div[class*="card"], article');
 
                     cards.forEach(card => {
-                        const titleLink = card.querySelector('a[href*="/job-detail/"]');
+                        const titleLink = card.closest('a[href*="/job-detail/"]') || card.querySelector('a[href*="/job-detail/"]');
                         if (!titleLink) return;
 
                         const title = titleLink.textContent.trim();
-                        if (!title) return;
+                        if (!title || title.length < 5) return;
 
                         const link = titleLink.href;
 
-                        // Company
                         let company = "N/A";
-                        const companyEl = card.querySelector('a[data-cy="company-name"], .company-name, .employer');
-                        if (companyEl) company = companyEl.textContent.trim();
-
-                        // Location
                         let location = "N/A";
-                        const locEl = card.querySelector('[data-cy="location"], .location, .job-location');
-                        if (locEl) location = locEl.textContent.trim();
-
-                        // Salary
                         let salary = "";
-                        const salaryEl = card.querySelector('[data-cy="salary"], .salary, .compensation');
-                        if (salaryEl) salary = salaryEl.textContent.trim();
-
-                        // Posted time
                         let posted = "";
-                        const postedEl = card.querySelector('time, .time, [data-testid="posted-time"]');
-                        if (postedEl) posted = postedEl.textContent.trim();
+
+                        // Tìm các thông tin xung quanh
+                        const parent = card.closest('div') || card.parentElement;
+                        if (parent) {
+                            const text = parent.textContent || "";
+
+                            // Company
+                            const companyMatch = text.match(/([A-Za-z\s&.,-]+?)(?=\s+(?:Highland|Atlanta|Houston|Remote|Today|Yesterday|\d+d ago))/);
+                            if (companyMatch) company = companyMatch[1].trim();
+
+                            // Location
+                            const locMatch = text.match(/(Highland|Atlanta|Houston|Remote|San Antonio|Tampa|Detroit|New York|Chicago|California|Texas|Florida)[^,\n]*/i);
+                            if (locMatch) location = locMatch[0].trim();
+
+                            // Salary
+                            const salaryMatch = text.match(/(\$\d{1,3}(?:,\d{3})*(?:\s*-\s*\$\d{1,3}(?:,\d{3})*)?)/);
+                            if (salaryMatch) salary = salaryMatch[0];
+
+                            // Posted time
+                            const postedMatch = text.match(/(Today|Yesterday|\d+\s*d\s*ago|\d+\s*h\s*ago)/i);
+                            if (postedMatch) posted = postedMatch[0];
+                        }
 
                         jobs.push({
                             Title: title,
@@ -152,7 +156,7 @@ async function runScraper() {
                 allJobs = allJobs.concat(jobsOnPage);
 
                 await page.close();
-                if (jobsOnPage.length > 5) break;
+                if (jobsOnPage.length > 3) break;
 
             } catch (error) {
                 console.log(`❌ Lỗi ${keyword} (Lần ${attempts}):`, error.message);
@@ -179,8 +183,6 @@ async function runScraper() {
             sendTelegramFile(fileName),
             sendToTeams(allJobs.length, fileLink)
         ]);
-
-        console.log("🏁 Hoàn tất!");
     } else {
         await sendTelegramAlert("❌ Không tìm thấy job mới nào trên Dice.com.");
     }
