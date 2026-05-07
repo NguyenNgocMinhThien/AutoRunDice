@@ -94,7 +94,6 @@ async function runScraper() {
     let allJobs = [];
 
     for (const kw of KEYWORDS) {
-        // Cấu trúc URL tìm kiếm của Dice.com
         const targetUrl = `https://www.dice.com/jobs?q=${encodeURIComponent(kw)}&location=Vancouver,%20BC`;
         let attempts = 0;
         const maxAttempts = 3;
@@ -108,16 +107,15 @@ async function runScraper() {
                     params: {
                         api_key: process.env.SCRAPER_API_KEY,
                         url: targetUrl,
-                        render: 'true', // BẮT BUỘC để render React/Angular trên Dice
+                        render: 'true',
                         country_code: 'ca' 
                     },
-                    timeout: 120000 // Tăng timeout lên 2 phút vì render JS tốn thời gian
+                    timeout: 120000 
                 });
 
                 const $ = cheerio.load(response.data);
                 let count = 0;
 
-                // Cấu trúc HTML của Dice thường sử dụng thẻ dhi-search-card
                 $('dhi-search-card').each((i, el) => {
                     const titleEl = $(el).find('a.card-title-link');
                     const title = titleEl.text().trim();
@@ -126,7 +124,6 @@ async function runScraper() {
 
                     let relativeLink = titleEl.attr('href');
                     let fullLink = relativeLink;
-                    // Đảm bảo link là URL tuyệt đối
                     if (relativeLink && !relativeLink.startsWith('http')) {
                         fullLink = `https://www.dice.com${relativeLink}`;
                     }
@@ -138,8 +135,33 @@ async function runScraper() {
                     const location = $(el).find('span[data-cy="search-result-location"]').text().trim() || 
                                      "Vancouver, BC";
 
-                    // Dice rất hiếm khi hiển thị lương ngoài trang tìm kiếm, cố gắng quét nếu có
-                    let salary = $(el).find('span[data-cy="search-card-salary"]').text().trim() || "N/A";
+                    // =========================================================
+                    // TÌM LƯƠNG TỪ CÁC THẺ BADGE THEO LAYOUT MỚI CỦA DICE
+                    // =========================================================
+                    let salary = "N/A";
+
+                    // 1. Quét qua các thẻ có dạng badge/chip
+                    $(el).find('[class*="badge"], [class*="chip"], dhi-badge span, .badge').each((i, badgeEl) => {
+                        let text = $(badgeEl).text().trim();
+                        // Nếu thẻ có chứa dấu $ thì đây chính là mức lương
+                        if (text.includes('$')) {
+                            salary = text;
+                            return false; // Thoát vòng lặp each
+                        }
+                    });
+
+                    // 2. Dự phòng: Nếu cách trên không thấy, tìm bất kỳ thẻ <span> ngắn nào chứa dấu $
+                    if (salary === "N/A") {
+                        $(el).find('span').each((i, spanEl) => {
+                            let text = $(spanEl).text().trim();
+                            // Chỉ lấy các đoạn text ngắn (dưới 20 ký tự) để tránh lấy nhầm vào mô tả dài
+                            if (text.includes('$') && text.length <= 20 && !text.includes('\n')) {
+                                salary = text;
+                                return false; // Thoát vòng lặp
+                            }
+                        });
+                    }
+                    // =========================================================
 
                     const isRemote = $(el).text().toLowerCase().includes('remote');
                     const applyMethod = isRemote ? "Remote/Online" : "Standard Apply";
@@ -147,7 +169,7 @@ async function runScraper() {
                     allJobs.push({
                         Title: title,
                         Company: company,
-                        Salary: salary,
+                        Salary: salary, // Đã cập nhật thuật toán quét lương
                         Location: location,
                         'Apply Method': applyMethod,
                         Link: fullLink || 'N/A',
@@ -158,17 +180,16 @@ async function runScraper() {
                 });
 
                 console.log(`✅ Lấy được ${count} jobs cho từ khóa "${kw}"`);
-                if (count > 0) break; // Thoát vòng lặp retry nếu lấy được dữ liệu thành công
+                if (count > 0) break;
 
             } catch (err) {
                 console.log(`⚠️ Lỗi ${kw} (lần ${attempts}): ${err.message}`);
-                if (attempts < maxAttempts) await new Promise(r => setTimeout(r, 10000)); // Nghỉ 10s trước khi thử lại
+                if (attempts < maxAttempts) await new Promise(r => setTimeout(r, 10000));
             }
         }
     }
 
     if (allJobs.length > 0) {
-        // Đổi tên file output cho phù hợp
         const fileName = `Dice_Jobs_${new Date().toISOString().slice(0,10)}.xlsx`;
 
         const worksheet = XLSX.utils.json_to_sheet(allJobs);
