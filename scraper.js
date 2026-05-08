@@ -166,7 +166,6 @@ async function runScraper() {
                     links.forEach(link => {
                         const title = link.textContent.trim();
                         if (!title || title.length < 10) return;
-                        if (title === 'Easy Apply' || title === 'Apply Now' || title === 'Apply') return;
 
                         const fullLink = link.href.split('?')[0];
 
