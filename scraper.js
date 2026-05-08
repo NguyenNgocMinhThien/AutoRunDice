@@ -79,26 +79,26 @@ async function sendTelegramAlert(message) {
     if (!botToken || !chatId) return;
     try {
         await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-            chat_id: chatId, 
-            text: message, 
+            chat_id: chatId,
+            text: message,
             parse_mode: 'HTML'
         });
-    } catch (e) {}
+    } catch (e) { }
 }
 
 async function sendTelegramFile(filePath) {
     const botToken = process.env.TELEGRAM_TOKEN;
     const chatId = process.env.TELEGRAM_CHAT_ID;
     if (!botToken || !chatId || !fs.existsSync(filePath)) return;
-    
+
     const form = new FormData();
     form.append('chat_id', chatId);
     form.append('document', fs.createReadStream(filePath));
     try {
-        await axios.post(`https://api.telegram.org/bot${botToken}/sendDocument`, form, { 
-            headers: form.getHeaders() 
+        await axios.post(`https://api.telegram.org/bot${botToken}/sendDocument`, form, {
+            headers: form.getHeaders()
         });
-    } catch (e) {}
+    } catch (e) { }
 }
 
 // ====================== HÀM CHÍNH ======================
@@ -129,35 +129,59 @@ async function runScraper() {
                 await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
                 await page.waitForTimeout(5000);
 
-                                    const result = await page.evaluate((currentKeyword) => {
+                const result = await page.evaluate((currentKeyword) => {
+                    // DEBUG - XÓA SAU KHI FIX XONG
+                    // Thay debugHTML cũ bằng cái này - dump card của job CÓ salary
+                    const debugHTML = (() => {
+                        const allLinks = document.querySelectorAll('a[href*="/job-detail/"]');
+
+                        for (const link of allLinks) {
+                            let card = link.closest('article') ||
+                                link.closest('div[class*="search-result"]') ||
+                                link.closest('div[class*="card"]') ||
+                                link.closest('li') ||
+                                link.parentElement?.parentElement?.parentElement;
+                            if (!card) continue;
+
+                            const text = card.textContent.replace(/\s+/g, ' ');
+
+                            // Chỉ dump card nào có salary thực sự
+                            const hasSalary = /\$[\d,]+|\d{5,6}\s*-\s*\d{5,6}|USD\s*\d+/i.test(text);
+                            if (!hasSalary) continue;
+
+                            const elements = [];
+                            card.querySelectorAll('*').forEach(el => {
+                                const txt = el.textContent.trim().replace(/\s+/g, ' ').substring(0, 60);
+                                if (txt.length > 1) {
+                                    elements.push(`<${el.tagName.toLowerCase()} class="${el.className}"> → "${txt}"`);
+                                }
+                            });
+                            return `=== CARD CÓ SALARY: ${link.textContent.trim()} ===\n` + elements.join('\n');
+                        }
+                        return "Không tìm thấy card có salary";
+                    })();
                     const jobs = [];
                     const links = document.querySelectorAll('a[href*="/job-detail/"]');
-                    let debugText = "";
 
-                    links.forEach((link, index) => {
-                        if (jobs.length >= 6) return;
-
+                    links.forEach(link => {
                         const title = link.textContent.trim();
                         if (!title || title.length < 10) return;
+                        if (title === 'Easy Apply' || title === 'Apply Now' || title === 'Apply') return;
 
                         const fullLink = link.href.split('?')[0];
 
-                        // === TÌM CARD RỘNG NHẤT CÓ THỂ ===
-                        let card = link.closest('article') || 
-                                   link.closest('div[class*="search-result"]') || 
-                                   link.closest('div[class*="card"]') || 
-                                   link.closest('li') || 
-                                   link.parentElement?.parentElement?.parentElement || 
-                                   link.closest('div');
+                        // Card rộng nhất
+                        let card = link.closest('article') ||
+                            link.closest('div[class*="search-result"]') ||
+                            link.closest('div[class*="flex flex-col gap-6"]') ||
+                            link.closest('div[class*="bg-surface-primary"]') ||
+                            link.parentElement?.parentElement?.parentElement?.parentElement?.parentElement ||
+                            link.closest('div');
 
                         let textToSearch = card ? card.textContent : document.body.textContent;
                         textToSearch = textToSearch.replace(/\s+/g, " ").trim();
 
-                        if (index < 3) {
-                            debugText += `Job ${index+1} Title: ${title}\nText snippet: ${textToSearch.substring(0, 600)}...\n\n`;
-                        }
-
-                        // ================== SALARY - SIÊU RỘNG ==================
+                        // ================== SALARY ==================
                         let salary = "";
                         const patterns = [
                             /(\$\d{1,3}(?:,\d{3})*(?:\s*-\s*\$\d{1,3}(?:,\d{3})*)?)/,
@@ -178,39 +202,73 @@ async function runScraper() {
 
                         if (!salary) return;
 
-                        // Company, Location, Posted
+                        // ================== COMPANY ==================
                         let company = "N/A";
-                        const companySelectors = ['a[data-cy*="company"]', 'a[href*="/company/"]', '[class*="Company"]', '[class*="company"]'];
-                        for (const sel of companySelectors) {
-                            const el = card.querySelector(sel);
-                            if (el) {
-                                const txt = el.textContent.trim();
-                                if (txt.length > 2 && !txt.includes("Easy Apply")) {
+
+                        // Leo lên từng cấp để tìm div bao ngoài cùng chứa span.logo
+                        let searchEl = link;
+                        for (let i = 0; i < 10; i++) {
+                            searchEl = searchEl.parentElement;
+                            if (!searchEl) break;
+
+                            const logoSpan = searchEl.querySelector('span[class*="logo"]');
+                            if (logoSpan) {
+                                const p = logoSpan.querySelector('p');
+                                if (p) {
+                                    const txt = p.textContent.trim();
+                                    if (txt.length > 2 && txt !== title && !txt.includes('Apply')) {
+                                        company = txt;
+                                    }
+                                }
+                                break; // Tìm thấy span.logo rồi thì dừng dù có company hay không
+                            }
+                        }
+                        // Cách 2: p.mb-0 (fallback - thường chứa company name)
+                        if (company === "N/A") {
+                            const mbP = card.querySelector('p.mb-0');
+                            if (mbP) {
+                                const txt = mbP.textContent.trim();
+                                if (txt.length > 2 && txt !== title && !txt.includes('$') && !txt.includes('Apply')) {
+                                    company = txt;
+                                }
+                            }
+                        }
+
+                        // Cách 3: link dẫn đến /company/ hoặc employer
+                        if (company === "N/A") {
+                            const companyLink = card.querySelector('a[href*="/company/"], a[href*="employer"]');
+                            if (companyLink) {
+                                const txt = companyLink.textContent.trim();
+                                if (txt.length > 2 && txt !== title) company = txt;
+                            }
+                        }
+
+                        // Cách 4: text-interaction class (link company style của Dice)
+                        if (company === "N/A") {
+                            const allAs = card.querySelectorAll('a.text-interaction, a[class*="text-interaction"]');
+                            for (const a of allAs) {
+                                const txt = a.textContent.trim();
+                                // Bỏ qua link job title và "Apply Now"
+                                if (txt.length > 2 && txt !== title && !txt.includes('Apply') && !txt.includes('$')) {
                                     company = txt;
                                     break;
                                 }
                             }
                         }
-
+                        // ================== LOCATION + POSTED ==================
                         let location = "N/A";
-                        const locSelectors = ['[class*="location"]', '[class*="Location"]', 'span[class*="metro"]'];
-                        for (const sel of locSelectors) {
-                            const el = card.querySelector(sel);
-                            if (el) {
-                                location = el.textContent.trim();
-                                if (location.length > 3) break;
-                            }
-                        }
-
                         let posted = "";
-                        const postedSelectors = ['[class*="posted"]', 'time', '[class*="ago"]'];
-                        for (const sel of postedSelectors) {
-                            const el = card.querySelector(sel);
-                            if (el) {
-                                posted = el.textContent.trim();
-                                if (posted.length > 2) break;
-                            }
-                        }
+
+                        const metaPs = card.querySelectorAll('p.text-sm.font-normal.text-zinc-600');
+                        // Lọc bỏ các p chỉ có dấu • hoặc quá ngắn
+                        const validMetaPs = Array.from(metaPs).filter(p => {
+                            const txt = p.textContent.trim();
+                            return txt.length > 2 && txt !== '•' && !txt.includes('$');
+                        });
+
+                        // validMetaPs[0] = location, validMetaPs[1] = posted date
+                        if (validMetaPs[0]) location = validMetaPs[0].textContent.trim();
+                        if (validMetaPs[1]) posted = validMetaPs[1].textContent.trim();
 
                         jobs.push({
                             Title: title,
@@ -223,16 +281,18 @@ async function runScraper() {
                         });
                     });
 
-                    return { 
-                        totalLinks: links.length, 
-                        jobsWithSalary: jobs.length, 
+                    return {
+                        totalLinks: links.length,
+                        jobsWithSalary: jobs.length,
                         sample: jobs.slice(0, 6),
-                        debugText 
+                        debugHTML
                     };
                 }, keyword);
 
-                console.log(`🔗 Tìm thấy ${result.totalLinks} link job`);
-                console.log(`💰 Tìm thấy ${result.jobsWithSalary} job có salary`);
+                if (result.debugHTML) console.log("=== DEBUG ===\n", result.debugHTML); {
+                    console.log(`🔗 Tìm thấy ${result.totalLinks} link job`);
+                    console.log(`💰 Tìm thấy ${result.jobsWithSalary} job có salary`);
+                }
 
                 if (result.debugText) {
                     console.log("\n🔍 === DEBUG TEXT (3 jobs đầu) ===");
