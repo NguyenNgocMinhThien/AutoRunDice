@@ -132,64 +132,68 @@ async function runScraper() {
                                     const result = await page.evaluate((currentKeyword) => {
                     const jobs = [];
                     const links = document.querySelectorAll('a[href*="/job-detail/"]');
+                    let debugText = "";
 
-                    links.forEach(link => {
+                    links.forEach((link, index) => {
+                        if (jobs.length >= 6) return;
+
                         const title = link.textContent.trim();
                         if (!title || title.length < 10) return;
 
                         const fullLink = link.href.split('?')[0];
 
-                        // Tìm card chứa toàn bộ job (rộng hơn)
-                        let card = link.closest('div[class*="card"], article, li, section') || 
-                                   link.parentElement.parentElement || link.closest('div');
+                        // === TÌM CARD RỘNG NHẤT CÓ THỂ ===
+                        let card = link.closest('article') || 
+                                   link.closest('div[class*="search-result"]') || 
+                                   link.closest('div[class*="card"]') || 
+                                   link.closest('li') || 
+                                   link.parentElement?.parentElement?.parentElement || 
+                                   link.closest('div');
 
-                        let textToSearch = (card ? card.textContent : document.body.textContent) || "";
-                        textToSearch = textToSearch.replace(/\s+/g, " ");
+                        let textToSearch = card ? card.textContent : document.body.textContent;
+                        textToSearch = textToSearch.replace(/\s+/g, " ").trim();
 
-                        // ================== SALARY (ưu tiên, nới lỏng lại) ==================
+                        if (index < 3) {
+                            debugText += `Job ${index+1} Title: ${title}\nText snippet: ${textToSearch.substring(0, 600)}...\n\n`;
+                        }
+
+                        // ================== SALARY - SIÊU RỘNG ==================
                         let salary = "";
                         const patterns = [
                             /(\$\d{1,3}(?:,\d{3})*(?:\s*-\s*\$\d{1,3}(?:,\d{3})*)?)/,
-                            /\$[\d,]+(?:\s*-\s*\$?[\d,]+)?/,
-                            /(\d{2,3}k?\s*-\s*\d{2,3}k?)/i,
                             /(\d{5,6}\s*-\s*\d{5,6})/,
-                            /USD\s*[\d,]+/i
+                            /USD\s*\d+/i,
+                            /(\d{2,3}k?\s*-\s*\d{2,3}k?)/i,
+                            /\$[\d,]+/,
+                            /\d{2,3}\s*-\s*\d{2,3}/
                         ];
 
                         for (const regex of patterns) {
                             const match = textToSearch.match(regex);
-                            if (match && match[0].length > 4) {
+                            if (match && match[0].length >= 4) {
                                 salary = match[0].trim();
-                                // Lọc một số noise phổ biến
-                                if (/^\d{2,3}-\d{2,3}$/.test(salary) && salary.length <= 6) continue;
                                 break;
                             }
                         }
 
-                        if (!salary) return;   // Chỉ lấy job có salary
+                        if (!salary) return;
 
-                        // ================== COMPANY ==================
+                        // Company, Location, Posted
                         let company = "N/A";
-                        const companySelectors = [
-                            'a[data-cy*="company"]', 'a[href*="/company/"]', 
-                            '[class*="Company"]', '[class*="company-name"]',
-                            'span[class*="employer"]', 'div[class*="employer"]'
-                        ];
-
+                        const companySelectors = ['a[data-cy*="company"]', 'a[href*="/company/"]', '[class*="Company"]', '[class*="company"]'];
                         for (const sel of companySelectors) {
                             const el = card.querySelector(sel);
                             if (el) {
                                 const txt = el.textContent.trim();
-                                if (txt.length > 1 && !txt.includes("Easy Apply")) {
+                                if (txt.length > 2 && !txt.includes("Easy Apply")) {
                                     company = txt;
                                     break;
                                 }
                             }
                         }
 
-                        // ================== LOCATION ==================
                         let location = "N/A";
-                        const locSelectors = ['[class*="location"]', '[class*="Location"]', '.metro', 'span[class*="city"]'];
+                        const locSelectors = ['[class*="location"]', '[class*="Location"]', 'span[class*="metro"]'];
                         for (const sel of locSelectors) {
                             const el = card.querySelector(sel);
                             if (el) {
@@ -198,9 +202,8 @@ async function runScraper() {
                             }
                         }
 
-                        // ================== POSTED ==================
                         let posted = "";
-                        const postedSelectors = ['[class*="posted"]', 'time', '[class*="ago"]', '[class*="date"]'];
+                        const postedSelectors = ['[class*="posted"]', 'time', '[class*="ago"]'];
                         for (const sel of postedSelectors) {
                             const el = card.querySelector(sel);
                             if (el) {
@@ -223,12 +226,18 @@ async function runScraper() {
                     return { 
                         totalLinks: links.length, 
                         jobsWithSalary: jobs.length, 
-                        sample: jobs.slice(0, 5) 
+                        sample: jobs.slice(0, 6),
+                        debugText 
                     };
                 }, keyword);
 
                 console.log(`🔗 Tìm thấy ${result.totalLinks} link job`);
                 console.log(`💰 Tìm thấy ${result.jobsWithSalary} job có salary`);
+
+                if (result.debugText) {
+                    console.log("\n🔍 === DEBUG TEXT (3 jobs đầu) ===");
+                    console.log(result.debugText);
+                }
 
                 if (result.sample && result.sample.length > 0) {
                     console.log("📋 Sample jobs:", result.sample);
