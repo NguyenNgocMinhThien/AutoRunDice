@@ -54,29 +54,20 @@ async function writeToGoogleSheet(jobs) {
     console.log(`📊 Ghi vào sheet: "${sheetName}"`);
 
     try {
-        // Xóa data cũ (giữ header)
+        // Xóa data cũ từ row 3 trở đi (giữ row 1: title, row 2: header)
         await sheets.spreadsheets.values.clear({
             spreadsheetId: SPREADSHEET_ID,
-            range: `${sheetName}!A2:Z`
+            range: `${sheetName}!A3:Z`
         });
 
-        // Ghi header
-        const headers = ['Title', 'Company', 'Salary', 'Location', 'Posted', 'Link', 'Keyword'];
-        await sheets.spreadsheets.values.update({
-            spreadsheetId: SPREADSHEET_ID,
-            range: `${sheetName}!A1`,
-            valueInputOption: 'RAW',
-            requestBody: { values: [headers] }
-        });
-
-        // Ghi data
+        // Ghi data từ row 3
         const rows = jobs.map(job => [
             job.Title, job.Company, job.Salary,
             job.Location, job.Posted, job.Link, job.Keyword
         ]);
         await sheets.spreadsheets.values.update({
             spreadsheetId: SPREADSHEET_ID,
-            range: `${sheetName}!A2`,
+            range: `${sheetName}!A3`,  // ← bắt đầu từ A3
             valueInputOption: 'RAW',
             requestBody: { values: rows }
         });
