@@ -119,6 +119,9 @@ async function sendTeamsAlert(message, fileLink = null) {
     const webhookUrl = process.env.TEAMS_WEBHOOK_URL;
     if (!webhookUrl) return;
     try {
+        const sheetLink = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/edit#gid=${SHEET_GID}`;
+        const excelLink = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/export?format=xlsx&gid=${SHEET_GID}`;
+
         await axios.post(webhookUrl, {
             "@type": "MessageCard",
             "@context": "http://schema.org/extensions",
@@ -127,12 +130,29 @@ async function sendTeamsAlert(message, fileLink = null) {
             "sections": [{
                 "activityTitle": "🎯 Dice.com Scraper",
                 "activitySubtitle": `Min $${MIN_SALARY_ANNUAL.toLocaleString()}/year`,
-                "facts": [{ "name": "Số job tìm thấy:", "value": message }],
-                "text": fileLink ? `🔗 File: ${fileLink}` : ""
-            }]
+                "facts": [
+                    { "name": "Số job tìm thấy:", "value": message },
+                    { "name": "Status:", "value": "✅ Đã ghi Google Sheets" }
+                ],
+                "text": fileLink ? `🔗 Catbox: ${fileLink}` : ""
+            }],
+            "potentialAction": [
+                {
+                    "@type": "OpenUri",
+                    "name": "📊 Mở Google Sheet",
+                    "targets": [{ "os": "default", "uri": sheetLink }]
+                },
+                {
+                    "@type": "OpenUri",
+                    "name": "📥 Tải Excel",
+                    "targets": [{ "os": "default", "uri": excelLink }]
+                }
+            ]
         });
         console.log("✅ Đã gửi thông báo lên Microsoft Teams");
-    } catch (e) { console.error("❌ Lỗi gửi Teams:", e.message); }
+    } catch (e) {
+        console.error("❌ Lỗi gửi Teams:", e.message);
+    }
 }
 
 async function sendTelegramAlert(message) {
