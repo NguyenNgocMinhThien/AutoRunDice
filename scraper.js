@@ -54,20 +54,20 @@ async function writeToGoogleSheet(jobs) {
     console.log(`📊 Ghi vào sheet: "${sheetName}"`);
 
     try {
-        // Xóa data cũ từ row 3 trở đi (giữ row 1: title, row 2: header)
+        // Xóa data cũ từ row 3 (giữ row 1: tiêu đề, row 2: header)
         await sheets.spreadsheets.values.clear({
             spreadsheetId: SPREADSHEET_ID,
             range: `${sheetName}!A3:Z`
         });
 
-        // Ghi data từ row 3
+        // Ghi data từ row 3 (row 1: tiêu đề, row 2: header đã có sẵn)
         const rows = jobs.map(job => [
             job.Title, job.Company, job.Salary,
             job.Location, job.Posted, job.Link, job.Keyword
         ]);
         await sheets.spreadsheets.values.update({
             spreadsheetId: SPREADSHEET_ID,
-            range: `${sheetName}!A3`,  // ← bắt đầu từ A3
+            range: `${sheetName}!A3`,
             valueInputOption: 'RAW',
             requestBody: { values: rows }
         });
@@ -119,49 +119,25 @@ async function sendTeamsAlert(message, fileLink = null) {
     const webhookUrl = process.env.TEAMS_WEBHOOK_URL;
     if (!webhookUrl) return;
     try {
-        const sheetLink = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/edit#gid=${SHEET_GID}`;
-        const excelLink = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/export?format=xlsx&gid=${SHEET_GID}`;
-
+        const sheetLink = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/edit?gid=${SHEET_GID}#gid=${SHEET_GID}`;
         await axios.post(webhookUrl, {
             "@type": "MessageCard",
-            "@context": "https://schema.org/extensions",
+            "@context": "http://schema.org/extensions",
             "themeColor": "0076D7",
             "summary": "Dice.com Scraper Report",
             "sections": [{
-                "activityTitle": "🎯 **Dice.com Scraper**",
+                "activityTitle": "🎯 Dice.com Scraper",
                 "activitySubtitle": `Min $${MIN_SALARY_ANNUAL.toLocaleString()}/year`,
                 "facts": [
-                    { "name": "Số job:", "value": message },
+                    { "name": "Số job tìm thấy:", "value": message },
                     { "name": "Status:", "value": "✅ Đã ghi Google Sheets" },
-                    ...(fileLink ? [{ "name": "Catbox:", "value": fileLink }] : [])
-                ],
-                "markdown": true
-            }],
-            "potentialAction": [
-                {
-                    "@type": "OpenUri",
-                    "name": "📊 Mở Google Sheet",
-                    "targets": [
-                        { "os": "default", "uri": sheetLink },
-                        { "os": "iOS", "uri": sheetLink },
-                        { "os": "android", "uri": sheetLink }
-                    ]
-                },
-                {
-                    "@type": "OpenUri",
-                    "name": "📥 Tải Excel",
-                    "targets": [
-                        { "os": "default", "uri": excelLink },
-                        { "os": "iOS", "uri": excelLink },
-                        { "os": "android", "uri": excelLink }
-                    ]
-                }
-            ]
+                    { "name": "📊 Google Sheet:", "value": sheetLink },
+                    ...(fileLink ? [{ "name": "📥 Catbox:", "value": fileLink }] : [])
+                ]
+            }]
         });
         console.log("✅ Đã gửi thông báo lên Microsoft Teams");
-    } catch (e) {
-        console.error("❌ Lỗi gửi Teams:", e.message);
-    }
+    } catch (e) { console.error("❌ Lỗi gửi Teams:", e.message); }
 }
 
 async function sendTelegramAlert(message) {
