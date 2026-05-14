@@ -123,44 +123,40 @@ async function sendTeamsAlert(message, fileLink = null) {
         const excelLink = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/export?format=xlsx&gid=${SHEET_GID}`;
 
         await axios.post(webhookUrl, {
-            "type": "message",
-            "attachments": [{
-                "contentType": "application/vnd.microsoft.card.adaptive",
-                "content": {
-                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                    "type": "AdaptiveCard",
-                    "version": "1.4",
-                    "body": [
-                        {
-                            "type": "TextBlock",
-                            "text": "🎯 Dice.com Scraper",
-                            "weight": "Bolder",
-                            "size": "Medium"
-                        },
-                        {
-                            "type": "FactSet",
-                            "facts": [
-                                { "title": "Min Salary:", "value": `$${MIN_SALARY_ANNUAL.toLocaleString()}/year` },
-                                { "title": "Số job:", "value": message },
-                                { "title": "Status:", "value": "✅ Đã ghi Google Sheets" },
-                                ...(fileLink ? [{ "title": "Catbox:", "value": fileLink }] : [])
-                            ]
-                        }
-                    ],
-                    "actions": [
-                        {
-                            "type": "Action.OpenUrl",
-                            "title": "📊 Mở Google Sheet",
-                            "url": sheetLink
-                        },
-                        {
-                            "type": "Action.OpenUrl",
-                            "title": "📥 Tải Excel",
-                            "url": excelLink
-                        }
+            "@type": "MessageCard",
+            "@context": "https://schema.org/extensions",
+            "themeColor": "0076D7",
+            "summary": "Dice.com Scraper Report",
+            "sections": [{
+                "activityTitle": "🎯 **Dice.com Scraper**",
+                "activitySubtitle": `Min $${MIN_SALARY_ANNUAL.toLocaleString()}/year`,
+                "facts": [
+                    { "name": "Số job:", "value": message },
+                    { "name": "Status:", "value": "✅ Đã ghi Google Sheets" },
+                    ...(fileLink ? [{ "name": "Catbox:", "value": fileLink }] : [])
+                ],
+                "markdown": true
+            }],
+            "potentialAction": [
+                {
+                    "@type": "OpenUri",
+                    "name": "📊 Mở Google Sheet",
+                    "targets": [
+                        { "os": "default", "uri": sheetLink },
+                        { "os": "iOS", "uri": sheetLink },
+                        { "os": "android", "uri": sheetLink }
+                    ]
+                },
+                {
+                    "@type": "OpenUri",
+                    "name": "📥 Tải Excel",
+                    "targets": [
+                        { "os": "default", "uri": excelLink },
+                        { "os": "iOS", "uri": excelLink },
+                        { "os": "android", "uri": excelLink }
                     ]
                 }
-            }]
+            ]
         });
         console.log("✅ Đã gửi thông báo lên Microsoft Teams");
     } catch (e) {
