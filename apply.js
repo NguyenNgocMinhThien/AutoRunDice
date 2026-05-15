@@ -149,16 +149,30 @@ async function applyJob(page, job) {
             return { success: true, status: 'ℹ️ Đã apply trước đó' };
         }
 
-        // ===== BƯỚC 1: Click Easy Apply → vào wizard =====
-        const applyLink = page.locator('a[href*="/job-applications/"]').first();
-        if (await applyLink.count() === 0) {
-            console.log('   ⚠️ Không tìm thấy nút Easy Apply');
-            return { success: false, status: '⚠️ Không tìm thấy nút Easy Apply' };
+        // ===== BƯỚC 1: Tìm nút Apply =====
+        // Trường hợp 1: Easy Apply → /job-applications/.../wizard
+        const easyApplyLink = page.locator('a[href*="/job-applications/"]').first();
+        // Trường hợp 2: Apply thường → /job-applications/.../start-apply
+        const normalApplyLink = page.locator('a[href*="/start-apply"], a[href*="start-apply"]').first();
+
+        if (await easyApplyLink.count() > 0) {
+            // Easy Apply → tự động được
+            await easyApplyLink.click();
+            await page.waitForURL('**/wizard**', { timeout: 15000 });
+            await page.waitForTimeout(2000);
+            console.log('   ✅ Bước 1: Vào wizard thành công');
+
+        } else if (await normalApplyLink.count() > 0) {
+            // Apply thường → báo thủ công
+            const applyUrl = await normalApplyLink.getAttribute('href');
+            console.log('   ⚠️ Job này không có Easy Apply, cần apply thủ công');
+            console.log('   🔗 Link apply:', applyUrl);
+            return { success: false, status: '⚠️ Cần apply thủ công' };
+
+        } else {
+            console.log('   ⚠️ Không tìm thấy nút Apply nào');
+            return { success: false, status: '⚠️ Không tìm thấy nút Apply' };
         }
-        await applyLink.click();
-        await page.waitForURL('**/wizard**', { timeout: 15000 });
-        await page.waitForTimeout(2000);
-        console.log('   ✅ Bước 1: Vào wizard thành công');
 
         // ===== BƯỚC 2: Click Next ngay, không làm gì thêm =====
         console.log('   ▶ Bước 2: Click Next...');
@@ -251,10 +265,10 @@ async function main() {
     const sheetName = sheets ? await getSheetName(sheets, SHEET_GID) : null;
     if (sheetName) console.log(`📊 Sheet: "${sheetName}"`);
 
-    const browser = await chromium.launch({ 
-    headless: process.env.CI ? true : false,  // headless trên CI, headed local
-    slowMo: process.env.CI ? 0 : 300
-});
+    const browser = await chromium.launch({
+        headless: process.env.CI ? true : false,  // headless trên CI, headed local
+        slowMo: process.env.CI ? 0 : 300
+    });
     const context = await browser.newContext({
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     });

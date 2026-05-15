@@ -2,9 +2,9 @@
   {
     "title": "Clinical EMR Configuration Analyst",
     "company": "NTT DATA Americas, Inc",
-    "link": "https://www.dice.com/job-detail/20ac3e66-70a3-4379-bd25-ef18b0409b2a",
+    "link": "https://www.dice.com/job-detail/dbbb83dd-102b-4e4e-9238-44f0885b0636",
     "row": 6,
-    "result": "✅ Đã apply thành công",
-    "timestamp": "2026-05-15T09:07:43.974Z"
+    "result": "❌ Lỗi: page.waitForURL: Timeout 15000ms exceeded.\n=======",
+    "timestamp": "2026-05-15T09:23:22.883Z"
   }
 ]
