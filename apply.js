@@ -155,7 +155,7 @@ async function applyJob(page, job) {
         await page.waitForTimeout(2000);
         console.log('   ✅ Bước 1: Vào wizard thành công');
 
-        // ===== BƯỚC 2: Resume đã có sẵn → click Next =====
+       // ===== BƯỚC 2: Resume → Next (step 1 → step 2) =====
         console.log('   📎 Bước 2: Xử lý resume...');
         const existingResume = page.locator('a:has-text(".pdf"), p:has-text(".pdf")');
         if (await existingResume.count() > 0) {
@@ -168,9 +168,20 @@ async function applyJob(page, job) {
                 console.log('   ✅ Upload resume xong');
             }
         }
+
+        // Click Next lần 1 (qua cover letter section)
         await page.locator('button:has-text("Next")').first().click();
         await page.waitForTimeout(2000);
-        console.log('   ✅ Bước 2: Đã click Next');
+        console.log('   ✅ Bước 2: Click Next lần 1');
+
+        // Nếu vẫn còn nút Next (step 1 chưa xong) → click lần 2
+        const stillHasNext = await page.locator('button:has-text("Next")').count() > 0;
+        const hasSubmit = await page.locator('button:has-text("Submit")').count() > 0;
+        if (stillHasNext && !hasSubmit) {
+            await page.locator('button:has-text("Next")').first().click();
+            await page.waitForTimeout(2000);
+            console.log('   ✅ Bước 2: Click Next lần 2');
+        }
 
         // ===== BƯỚC 3: Chờ Submit rồi click =====
         console.log('   📝 Bước 3: Chờ Submit...');
