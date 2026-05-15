@@ -150,27 +150,26 @@ async function applyJob(page, job) {
         }
 
         // ===== BƯỚC 1: Tìm nút Apply =====
-        // Trường hợp 1: Easy Apply → /job-applications/.../wizard
-        const easyApplyLink = page.locator('a[href*="/job-applications/"]').first();
-        // Trường hợp 2: Apply thường → /job-applications/.../start-apply
-        const normalApplyLink = page.locator('a[href*="/start-apply"], a[href*="start-apply"]').first();
+        const easyApplyLink = page.locator('a[href*="/job-applications/"][href*="/wizard"], a[href*="/job-applications/"]:not([href*="start-apply"])').first();
+        const normalApplyLink = page.locator('a[href*="start-apply"]').first();
 
         if (await easyApplyLink.count() > 0) {
-            // Easy Apply → tự động được
             await easyApplyLink.click();
             await page.waitForURL('**/wizard**', { timeout: 15000 });
             await page.waitForTimeout(2000);
-            console.log('   ✅ Bước 1: Vào wizard thành công');
+            console.log('   ✅ Bước 1: Vào wizard thành công (Easy Apply)');
 
         } else if (await normalApplyLink.count() > 0) {
-            // Apply thường → báo thủ công
-            const applyUrl = await normalApplyLink.getAttribute('href');
             console.log('   ⚠️ Job này không có Easy Apply, cần apply thủ công');
-            console.log('   🔗 Link apply:', applyUrl);
             return { success: false, status: '⚠️ Cần apply thủ công' };
 
         } else {
-            console.log('   ⚠️ Không tìm thấy nút Apply nào');
+            // Kiểm tra đang ở trang nào
+            const allLinks = await page.evaluate(() =>
+                Array.from(document.querySelectorAll('a[href*="job-applications"], a[href*="apply"]'))
+                    .map(a => a.href).slice(0, 5)
+            );
+            console.log('   🔗 Links tìm thấy:', allLinks);
             return { success: false, status: '⚠️ Không tìm thấy nút Apply' };
         }
 
