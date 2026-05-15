@@ -5,15 +5,15 @@ import https from 'https';
 import path from 'path';
 
 // ====================== CONFIG ======================
-const DICE_EMAIL    = process.env.DICE_EMAIL;
+const DICE_EMAIL = process.env.DICE_EMAIL;
 const DICE_PASSWORD = process.env.DICE_PASSWORD;
-const RESUME_URL    = process.env.RESUME_URL;
+const RESUME_URL = process.env.RESUME_URL;
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const SHEET_GID     = process.env.SHEET_GID;
-const JOBS_JSON     = process.env.JOBS_JSON;
+const SHEET_GID = process.env.SHEET_GID;
+const JOBS_JSON = process.env.JOBS_JSON;
 
 const RESUME_PATH = '/tmp/resume.pdf';
-const LOG_PATH    = 'apply_log.json';
+const LOG_PATH = 'apply_log.json';
 
 // ====================== GOOGLE SHEETS ======================
 async function getSheetsClient() {
@@ -104,7 +104,7 @@ async function downloadResume(url) {
                 file.on('finish', () => { file.close(); resolve(RESUME_PATH); });
             }
         }).on('error', (err) => {
-            fs.unlink(RESUME_PATH, () => {});
+            fs.unlink(RESUME_PATH, () => { });
             reject(err);
         });
     });
@@ -154,6 +154,19 @@ async function applyJob(page, job) {
     try {
         await page.goto(job.link, { waitUntil: 'networkidle', timeout: 60000 });
         await page.waitForTimeout(3000);
+        // DEBUG - xem tất cả button trên trang
+        const buttons = await page.evaluate(() => {
+            return Array.from(document.querySelectorAll('button, a[class*="apply"], [data-cy*="apply"]'))
+                .map(el => ({
+                    tag: el.tagName,
+                    text: el.textContent.trim().substring(0, 50),
+                    class: el.className.substring(0, 80),
+                    dataCy: el.getAttribute('data-cy') || ''
+                }))
+                .filter(el => el.text.length > 0);
+        });
+        console.log('=== BUTTONS ON PAGE ===');
+        buttons.forEach(b => console.log(`${b.tag} | cy="${b.dataCy}" | class="${b.class}" | text="${b.text}"`));
 
         // Tìm nút Apply / Easy Apply
         const applySelectors = [
