@@ -207,6 +207,7 @@ async function applyJob(page, job) {
 
         while (step <= maxSteps) {
             console.log(`   📝 Step ${step}...`);
+            await page.screenshot({ path: `/tmp/step_${step}.png` });
             const currentUrl = page.url();
 
             // ===== Upload Resume =====
