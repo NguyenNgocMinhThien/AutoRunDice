@@ -2,16 +2,21 @@ import { chromium } from 'playwright';
 import { google } from 'googleapis';
 import fs from 'fs';
 import https from 'https';
+import path from 'path';
+import os from 'os';
 
 // ====================== CONFIG ======================
-const DICE_EMAIL     = process.env.DICE_EMAIL;
-const DICE_PASSWORD  = process.env.DICE_PASSWORD;
-const RESUME_URL     = process.env.RESUME_URL;
+const DICE_EMAIL = process.env.DICE_EMAIL;
+const DICE_PASSWORD = process.env.DICE_PASSWORD;
+const RESUME_URL = process.env.RESUME_URL;
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const SHEET_GID      = process.env.SHEET_GID;
-const JOBS_JSON      = process.env.JOBS_JSON;
-const RESUME_PATH    = '/tmp/resume.pdf';
-const LOG_PATH       = 'apply_log.json';
+const SHEET_GID = process.env.SHEET_GID;
+const JOBS_JSON = process.env.JOBS_JSON;
+const RESUME_FILE = 'CV_Alex_Morgan.pdf';
+const RESUME_PATH = process.platform === 'win32'
+    ? path.join(os.tmpdir(), RESUME_FILE)
+    : path.join('/tmp', RESUME_FILE);
+const LOG_PATH = 'apply_log.json';
 
 // ====================== GOOGLE SHEETS ======================
 async function getSheetsClient() {
@@ -44,10 +49,10 @@ async function updateJobStatus(sheets, sheetName, rowNum, status, bgColor) {
             requestBody: { values: [[status]] }
         });
         const colorMap = {
-            '#C8E6C9': { red: 0.78, green: 0.9,   blue: 0.78  },
-            '#FFCDD2': { red: 1,    green: 0.8,   blue: 0.82  },
-            '#FFF9C4': { red: 1,    green: 0.976, blue: 0.769 },
-            '#FFE0B2': { red: 1,    green: 0.878, blue: 0.698 }
+            '#C8E6C9': { red: 0.78, green: 0.9, blue: 0.78 },
+            '#FFCDD2': { red: 1, green: 0.8, blue: 0.82 },
+            '#FFF9C4': { red: 1, green: 0.976, blue: 0.769 },
+            '#FFE0B2': { red: 1, green: 0.878, blue: 0.698 }
         };
         const color = colorMap[bgColor] || colorMap['#FFE0B2'];
         await sheets.spreadsheets.batchUpdate({
@@ -94,7 +99,7 @@ async function downloadResume(url) {
                 file.on('finish', () => { file.close(); resolve(RESUME_PATH); });
             }
         }).on('error', (err) => {
-            fs.unlink(RESUME_PATH, () => {});
+            fs.unlink(RESUME_PATH, () => { });
             reject(err);
         });
     });
@@ -155,48 +160,40 @@ async function applyJob(page, job) {
         await page.waitForTimeout(2000);
         console.log('   ✅ Bước 1: Vào wizard thành công');
 
-       // ===== BƯỚC 2: Resume → Next (step 1 → step 2) =====
-        console.log('   📎 Bước 2: Xử lý resume...');
-        const existingResume = page.locator('a:has-text(".pdf"), p:has-text(".pdf")');
-        if (await existingResume.count() > 0) {
-            console.log('   ✅ Resume đã có sẵn');
-        } else {
-            const fileInput = page.locator('input[type="file"]').first();
-            if (await fileInput.count() > 0) {
-                await fileInput.setInputFiles(RESUME_PATH);
-                await page.waitForTimeout(3000);
-                console.log('   ✅ Upload resume xong');
+        // ===== BƯỚC 2: Click Next ngay, không làm gì thêm =====
+        console.log('   ▶ Bước 2: Click Next...');
+        await page.waitForTimeout(2000);
+        await page.locator('button:has-text("Next")').first().click();
+        await page.waitForTimeout(3000);
+        console.log('   ✅ Bước 2: Đã click Next, URL:', page.url());
+        // ===== BƯỚC 3: Chờ Submit xuất hiện =====
+        console.log('   📝 Bước 3: Chờ trang Review + Submit...');
+
+        // Chờ tối đa 15s cho nút Submit xuất hiện
+        let submitFound = false;
+        for (let i = 0; i < 15; i++) {
+            await page.waitForTimeout(1000);
+            const submitCount = await page.locator('button:has-text("Submit")').count();
+            const nextCount = await page.locator('button:has-text("Next")').count();
+            console.log(`   ⏳ ${i + 1}s | Submit: ${submitCount} | Next: ${nextCount} | URL: ${page.url()}`);
+            if (submitCount > 0) {
+                submitFound = true;
+                break;
             }
         }
 
-        // Click Next lần 1 (qua cover letter section)
-        await page.locator('button:has-text("Next")').first().click();
-        await page.waitForTimeout(2000);
-        console.log('   ✅ Bước 2: Click Next lần 1');
-
-        // Nếu vẫn còn nút Next (step 1 chưa xong) → click lần 2
-        const stillHasNext = await page.locator('button:has-text("Next")').count() > 0;
-        const hasSubmit = await page.locator('button:has-text("Submit")').count() > 0;
-        if (stillHasNext && !hasSubmit) {
-            await page.locator('button:has-text("Next")').first().click();
-            await page.waitForTimeout(2000);
-            console.log('   ✅ Bước 2: Click Next lần 2');
-        }
-
-        // ===== BƯỚC 3: Chờ Submit rồi click =====
-        console.log('   📝 Bước 3: Chờ Submit...');
-        try {
-            await page.waitForSelector('button:has-text("Submit")', { timeout: 15000 });
-            console.log('   ✅ Thấy nút Submit!');
-        } catch (e) {
-            console.log('   ⚠️ Timeout chờ Submit, URL:', page.url());
+        if (!submitFound) {
+            console.log('   ⚠️ Không tìm thấy nút Submit sau 15s');
             return { success: false, status: '⚠️ Không tìm thấy nút Submit' };
         }
-        await page.locator('button:has-text("Submit")').first().click();
-        await page.waitForTimeout(3000);
-        console.log('   ✅ Bước 3: Đã click Submit');
 
-        // ===== Kiểm tra thành công =====
+        // ===== BƯỚC 4: Click Submit =====
+        console.log('   ✅ Thấy Submit! Đang click...');
+        await page.locator('button:has-text("Submit")').first().click();
+        await page.waitForTimeout(4000);
+        console.log('   ✅ Bước 4: Đã click Submit, URL:', page.url());
+
+        // Kiểm tra thành công
         const succeeded =
             page.url().includes('/success') ||
             await page.locator('text=Your application is on its way').count() > 0 ||
@@ -206,6 +203,13 @@ async function applyJob(page, job) {
             console.log('   🎉 Apply thành công!');
             return { success: true, status: '✅ Đã apply thành công' };
         }
+
+        // Log buttons hiện tại nếu chưa success
+        const btns = await page.evaluate(() =>
+            Array.from(document.querySelectorAll('button'))
+                .map(b => b.textContent.trim()).filter(t => t.length > 0)
+        );
+        console.log('   🔘 Buttons sau Submit:', btns);
         return { success: false, status: '⚠️ Cần kiểm tra thủ công' };
 
     } catch (e) {
@@ -247,7 +251,7 @@ async function main() {
     const sheetName = sheets ? await getSheetName(sheets, SHEET_GID) : null;
     if (sheetName) console.log(`📊 Sheet: "${sheetName}"`);
 
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({ headless: false, slowMo: 300 });
     const context = await browser.newContext({
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     });
