@@ -251,7 +251,10 @@ async function main() {
     const sheetName = sheets ? await getSheetName(sheets, SHEET_GID) : null;
     if (sheetName) console.log(`📊 Sheet: "${sheetName}"`);
 
-    const browser = await chromium.launch({ headless: false, slowMo: 300 });
+    const browser = await chromium.launch({ 
+    headless: process.env.CI ? true : false,  // headless trên CI, headed local
+    slowMo: process.env.CI ? 0 : 300
+});
     const context = await browser.newContext({
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     });
