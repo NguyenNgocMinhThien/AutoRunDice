@@ -173,77 +173,59 @@ async function applyJob(page, job) {
         await page.waitForTimeout(2000);
         console.log('   ✅ Bước 1: Vào wizard thành công');
 
-        // ===== BƯỚC 2: Upload resume → click Next =====
+        // ===== BƯỚC 2: Upload resume → Next =====
         console.log('   📎 Bước 2: Xử lý resume...');
-
-        // Kiểm tra resume đã có sẵn chưa
-        const existingResume = page.locator('p:has-text(".pdf"), [class*="file-name"], a:has-text(".pdf")');
+        const existingResume = page.locator('p:has-text(".pdf"), a:has-text(".pdf")');
         if (await existingResume.count() > 0) {
-            console.log('   ✅ Resume đã có sẵn, skip upload');
+            console.log('   ✅ Resume đã có sẵn');
         } else {
-            // Upload resume mới
             const fileInput = page.locator('input[type="file"]').first();
             if (await fileInput.count() > 0) {
                 await fileInput.setInputFiles(RESUME_PATH);
                 await page.waitForTimeout(3000);
                 console.log('   ✅ Upload resume xong');
-            } else {
-                console.log('   ⚠️ Không tìm thấy file input, thử tiếp...');
             }
         }
-
-        // Click Next
-        const nextBtn = page.locator('button:has-text("Next")').first();
-        if (await nextBtn.count() === 0) {
-            console.log('   ⚠️ Không tìm thấy nút Next');
-            return { success: false, status: '⚠️ Không tìm thấy nút Next' };
-        }
-        await nextBtn.click();
+        await page.locator('button:has-text("Next")').first().click();
         await page.waitForTimeout(2000);
         console.log('   ✅ Bước 2: Next qua resume');
 
-        // ===== DEBUG: Chụp screenshot sau Next =====
-        await page.screenshot({ path: '/tmp/after_next.png', fullPage: true });
-        console.log('   📸 Screenshot after Next saved');
-        
-        // Log tất cả buttons hiện tại
-        const btns = await page.evaluate(() => 
-            Array.from(document.querySelectorAll('button'))
-                .map(b => b.textContent.trim())
-                .filter(t => t.length > 0)
-        );
-        console.log('   🔘 Buttons sau Next:', btns);
-        
-        // Log URL hiện tại
-        console.log('   🌐 URL sau Next:', page.url());
-        // ===== BƯỚC 3: Click Submit =====
-        console.log('   📝 Bước 3: Submit...');
+        // ===== BƯỚC 3: Cover Letter → Next (bỏ qua, optional) =====
+        console.log('   📝 Bước 3: Xử lý cover letter...');
+        const coverLetterNext = page.locator('button:has-text("Next")').first();
+        if (await coverLetterNext.count() > 0) {
+            await coverLetterNext.click();
+            await page.waitForTimeout(2000);
+            console.log('   ✅ Bước 3: Next qua cover letter');
+        }
 
-        // Chờ nút Submit xuất hiện (tối đa 10s)
+        // ===== BƯỚC 4: Submit =====
+        console.log('   📝 Bước 4: Submit...');
         try {
             await page.waitForSelector('button:has-text("Submit")', { timeout: 10000 });
         } catch (e) {
-            console.log('   ⚠️ Timeout chờ nút Submit');
+            // Log buttons hiện tại để debug
+            const btns = await page.evaluate(() =>
+                Array.from(document.querySelectorAll('button'))
+                    .map(b => b.textContent.trim()).filter(t => t.length > 0)
+            );
+            console.log('   ⚠️ Buttons hiện tại:', btns);
             return { success: false, status: '⚠️ Không tìm thấy nút Submit' };
         }
-
-        const submitBtn = page.locator('button:has-text("Submit")').first();
-        await submitBtn.click();
+        await page.locator('button:has-text("Submit")').first().click();
         await page.waitForTimeout(3000);
-        console.log('   ✅ Bước 3: Đã click Submit');
+        console.log('   ✅ Bước 4: Đã click Submit');
 
         // ===== Kiểm tra thành công =====
         const isSuccess =
             page.url().includes('/success') ||
             await page.locator('text=Your application is on its way').count() > 0 ||
-            await page.locator('text=Excellent').count() > 0 ||
-            await page.locator('text=application has been submitted').count() > 0;
+            await page.locator('text=Excellent').count() > 0;
 
         if (isSuccess) {
             console.log('   🎉 Apply thành công!');
             return { success: true, status: '✅ Đã apply thành công' };
         }
-
         return { success: false, status: '⚠️ Cần kiểm tra thủ công' };
 
     } catch (e) {
