@@ -5,15 +5,15 @@ import https from 'https';
 import path from 'path';
 
 // ====================== CONFIG ======================
-const DICE_EMAIL = process.env.DICE_EMAIL;
+const DICE_EMAIL    = process.env.DICE_EMAIL;
 const DICE_PASSWORD = process.env.DICE_PASSWORD;
-const RESUME_URL = process.env.RESUME_URL;
+const RESUME_URL    = process.env.RESUME_URL;
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const SHEET_GID = process.env.SHEET_GID;
-const JOBS_JSON = process.env.JOBS_JSON;
+const SHEET_GID     = process.env.SHEET_GID;
+const JOBS_JSON     = process.env.JOBS_JSON;
 
 const RESUME_PATH = '/tmp/resume.pdf';
-const LOG_PATH = 'apply_log.json';
+const LOG_PATH    = 'apply_log.json';
 
 // ====================== GOOGLE SHEETS ======================
 async function getSheetsClient() {
@@ -104,7 +104,7 @@ async function downloadResume(url) {
                 file.on('finish', () => { file.close(); resolve(RESUME_PATH); });
             }
         }).on('error', (err) => {
-            fs.unlink(RESUME_PATH, () => { });
+            fs.unlink(RESUME_PATH, () => {});
             reject(err);
         });
     });
@@ -152,144 +152,79 @@ async function applyJob(page, job) {
     console.log(`   Link: ${job.link}`);
 
     try {
+        // Vào trang job detail
         await page.goto(job.link, { waitUntil: 'networkidle', timeout: 60000 });
         await page.waitForTimeout(3000);
-        // DEBUG - xem tất cả button trên trang
-        const buttons = await page.evaluate(() => {
-            return Array.from(document.querySelectorAll('button, a[class*="apply"], [data-cy*="apply"]'))
-                .map(el => ({
-                    tag: el.tagName,
-                    text: el.textContent.trim().substring(0, 50),
-                    class: el.className.substring(0, 80),
-                    dataCy: el.getAttribute('data-cy') || ''
-                }))
-                .filter(el => el.text.length > 0);
-        });
-        console.log('=== BUTTONS ON PAGE ===');
-        buttons.forEach(b => console.log(`${b.tag} | cy="${b.dataCy}" | class="${b.class}" | text="${b.text}"`));
 
-        // Tìm nút Apply / Easy Apply
-        const applySelectors = [
-            'a[href*="/job-applications/"]',          // link trực tiếp đến wizard
-            'a:has-text("Easy Apply")',
-            'a:has-text("Apply Now")',
-            'button:has-text("Easy Apply")',
-            'button:has-text("Apply Now")',
-            '[data-cy="apply-button"]'
-        ];
-
-        let applyBtn = null;
-        for (const sel of applySelectors) {
-            const btn = page.locator(sel).first();
-            if (await btn.count() > 0) {
-                applyBtn = btn;
-                console.log(`   🎯 Tìm thấy nút Apply: "${sel}"`);
-                break;
-            }
-        }
-        const alreadyApplied = page.locator('button:has-text("Applied"), a:has-text("Applied")');
-        if (await alreadyApplied.count() > 0) {
+        // Kiểm tra đã apply chưa
+        if (await page.locator('button:has-text("Applied")').count() > 0) {
             console.log('   ℹ️ Job này đã apply rồi');
             return { success: true, status: 'ℹ️ Đã apply trước đó' };
         }
 
-        if (!applyBtn) {
-            console.log('   ⚠️ Không tìm thấy nút Apply');
-            return { success: false, status: '⚠️ Không tìm thấy nút Apply' };
+        // ===== BƯỚC 1: Click Easy Apply → vào wizard =====
+        const applyLink = page.locator('a[href*="/job-applications/"]').first();
+        if (await applyLink.count() === 0) {
+            console.log('   ⚠️ Không tìm thấy nút Easy Apply');
+            return { success: false, status: '⚠️ Không tìm thấy nút Easy Apply' };
+        }
+        await applyLink.click();
+        await page.waitForURL('**/wizard**', { timeout: 15000 });
+        await page.waitForTimeout(2000);
+        console.log('   ✅ Bước 1: Vào wizard thành công');
+
+        // ===== BƯỚC 2: Upload resume → click Next =====
+        console.log('   📎 Bước 2: Xử lý resume...');
+
+        // Kiểm tra resume đã có sẵn chưa
+        const existingResume = page.locator('p:has-text(".pdf"), [class*="file-name"], a:has-text(".pdf")');
+        if (await existingResume.count() > 0) {
+            console.log('   ✅ Resume đã có sẵn, skip upload');
+        } else {
+            // Upload resume mới
+            const fileInput = page.locator('input[type="file"]').first();
+            if (await fileInput.count() > 0) {
+                await fileInput.setInputFiles(RESUME_PATH);
+                await page.waitForTimeout(3000);
+                console.log('   ✅ Upload resume xong');
+            } else {
+                console.log('   ⚠️ Không tìm thấy file input, thử tiếp...');
+            }
         }
 
-        await applyBtn.click();
+        // Click Next
+        const nextBtn = page.locator('button:has-text("Next")').first();
+        if (await nextBtn.count() === 0) {
+            console.log('   ⚠️ Không tìm thấy nút Next');
+            return { success: false, status: '⚠️ Không tìm thấy nút Next' };
+        }
+        await nextBtn.click();
+        await page.waitForTimeout(2000);
+        console.log('   ✅ Bước 2: Next qua resume');
+
+        // ===== BƯỚC 3: Click Submit =====
+        console.log('   📝 Bước 3: Submit...');
+        await page.waitForTimeout(1000);
+
+        const submitBtn = page.locator('button:has-text("Submit")').first();
+        if (await submitBtn.count() === 0) {
+            console.log('   ⚠️ Không tìm thấy nút Submit');
+            return { success: false, status: '⚠️ Không tìm thấy nút Submit' };
+        }
+        await submitBtn.click();
         await page.waitForTimeout(3000);
+        console.log('   ✅ Bước 3: Đã click Submit');
 
-        // Xử lý form apply (multi-step)
-        let step = 1;
-        const maxSteps = 10;
+        // ===== Kiểm tra thành công =====
+        const isSuccess =
+            page.url().includes('/success') ||
+            await page.locator('text=Your application is on its way').count() > 0 ||
+            await page.locator('text=Excellent').count() > 0 ||
+            await page.locator('text=application has been submitted').count() > 0;
 
-        while (step <= maxSteps) {
-            console.log(`   📝 Step ${step}...`);
-            await page.screenshot({ path: `/tmp/step_${step}.png` });
-            const currentUrl = page.url();
-
-            // ===== Upload Resume =====
-            const fileInputs = page.locator('input[type="file"]');
-            if (await fileInputs.count() > 0) {
-                console.log('   📎 Upload resume...');
-                await fileInputs.first().setInputFiles(RESUME_PATH);
-                await page.waitForTimeout(2000);
-            }
-
-            // ===== Điền các field còn thiếu =====
-            // Phone
-            const phoneInput = page.locator('input[name*="phone"], input[placeholder*="phone"], input[placeholder*="Phone"]');
-            if (await phoneInput.count() > 0 && await phoneInput.first().inputValue() === '') {
-                await phoneInput.first().fill('555-000-0000');
-            }
-
-            // Xử lý dropdown "Are you legally authorized"
-            const authDropdown = page.locator('select').filter({ hasText: /authorized|eligible|legal/i });
-            if (await authDropdown.count() > 0) {
-                await authDropdown.first().selectOption({ index: 1 });
-                await page.waitForTimeout(500);
-            }
-
-            // Xử lý Yes/No radio buttons
-            const yesRadios = page.locator('input[type="radio"][value*="yes" i], input[type="radio"][value*="true" i]');
-            if (await yesRadios.count() > 0) {
-                await yesRadios.first().check();
-            }
-
-            // ===== Tìm nút Next / Submit =====
-            const nextSelectors = [
-                'button:has-text("Submit")',
-                'button:has-text("Submit Application")',
-                'button[type="submit"]',
-                'button:has-text("Next")',
-                'button:has-text("Continue")'
-            ];
-
-            let nextBtn = null;
-            for (const sel of nextSelectors) {
-                const btn = page.locator(sel).last();
-                if (await btn.count() > 0 && await btn.isEnabled()) {
-                    nextBtn = btn;
-                    break;
-                }
-            }
-
-            if (!nextBtn) {
-                console.log('   ⚠️ Không tìm thấy nút Next/Submit');
-                break;
-            }
-
-            const btnText = await nextBtn.textContent();
-            console.log(`   ▶ Click: "${btnText?.trim()}"`);
-            await nextBtn.click();
-            await page.waitForTimeout(3000);
-
-            // Kiểm tra đã submit thành công chưa
-            const successIndicators = [
-                'text=Application Submitted',
-                'text=Successfully Applied',
-                'text=Thank you',
-                'text=application has been submitted',
-                '[data-cy="application-submitted"]'
-            ];
-
-            for (const indicator of successIndicators) {
-                if (await page.locator(indicator).count() > 0) {
-                    console.log('   ✅ Apply thành công!');
-                    return { success: true, status: '✅ Đã apply thành công' };
-                }
-            }
-
-            // Nếu URL thay đổi nhiều → có thể đã xong
-            if (page.url() !== currentUrl && page.url().includes('confirmation')) {
-                console.log('   ✅ Apply thành công (redirect)!');
-                return { success: true, status: '✅ Đã apply thành công' };
-            }
-
-            if (btnText?.toLowerCase().includes('submit')) break;
-            step++;
+        if (isSuccess) {
+            console.log('   🎉 Apply thành công!');
+            return { success: true, status: '✅ Đã apply thành công' };
         }
 
         return { success: false, status: '⚠️ Cần kiểm tra thủ công' };
