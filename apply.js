@@ -170,11 +170,12 @@ async function applyJob(page, job) {
 
         // Tìm nút Apply / Easy Apply
         const applySelectors = [
+            'a[href*="/job-applications/"]',          // link trực tiếp đến wizard
+            'a:has-text("Easy Apply")',
+            'a:has-text("Apply Now")',
             'button:has-text("Easy Apply")',
             'button:has-text("Apply Now")',
-            'button:has-text("Apply")',
-            '[data-cy="apply-button"]',
-            '.apply-button'
+            '[data-cy="apply-button"]'
         ];
 
         let applyBtn = null;
@@ -182,8 +183,14 @@ async function applyJob(page, job) {
             const btn = page.locator(sel).first();
             if (await btn.count() > 0) {
                 applyBtn = btn;
+                console.log(`   🎯 Tìm thấy nút Apply: "${sel}"`);
                 break;
             }
+        }
+        const alreadyApplied = page.locator('button:has-text("Applied"), a:has-text("Applied")');
+        if (await alreadyApplied.count() > 0) {
+            console.log('   ℹ️ Job này đã apply rồi');
+            return { success: true, status: 'ℹ️ Đã apply trước đó' };
         }
 
         if (!applyBtn) {
