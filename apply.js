@@ -5,15 +5,15 @@ import https from 'https';
 import path from 'path';
 
 // ====================== CONFIG ======================
-const DICE_EMAIL    = process.env.DICE_EMAIL;
+const DICE_EMAIL = process.env.DICE_EMAIL;
 const DICE_PASSWORD = process.env.DICE_PASSWORD;
-const RESUME_URL    = process.env.RESUME_URL;
+const RESUME_URL = process.env.RESUME_URL;
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const SHEET_GID     = process.env.SHEET_GID;
-const JOBS_JSON     = process.env.JOBS_JSON;
+const SHEET_GID = process.env.SHEET_GID;
+const JOBS_JSON = process.env.JOBS_JSON;
 
 const RESUME_PATH = '/tmp/resume.pdf';
-const LOG_PATH    = 'apply_log.json';
+const LOG_PATH = 'apply_log.json';
 
 // ====================== GOOGLE SHEETS ======================
 async function getSheetsClient() {
@@ -104,7 +104,7 @@ async function downloadResume(url) {
                 file.on('finish', () => { file.close(); resolve(RESUME_PATH); });
             }
         }).on('error', (err) => {
-            fs.unlink(RESUME_PATH, () => {});
+            fs.unlink(RESUME_PATH, () => { });
             reject(err);
         });
     });
@@ -204,13 +204,16 @@ async function applyJob(page, job) {
 
         // ===== BƯỚC 3: Click Submit =====
         console.log('   📝 Bước 3: Submit...');
-        await page.waitForTimeout(1000);
 
-        const submitBtn = page.locator('button:has-text("Submit")').first();
-        if (await submitBtn.count() === 0) {
-            console.log('   ⚠️ Không tìm thấy nút Submit');
+        // Chờ nút Submit xuất hiện (tối đa 10s)
+        try {
+            await page.waitForSelector('button:has-text("Submit")', { timeout: 10000 });
+        } catch (e) {
+            console.log('   ⚠️ Timeout chờ nút Submit');
             return { success: false, status: '⚠️ Không tìm thấy nút Submit' };
         }
+
+        const submitBtn = page.locator('button:has-text("Submit")').first();
         await submitBtn.click();
         await page.waitForTimeout(3000);
         console.log('   ✅ Bước 3: Đã click Submit');
