@@ -202,6 +202,20 @@ async function applyJob(page, job) {
         await page.waitForTimeout(2000);
         console.log('   ✅ Bước 2: Next qua resume');
 
+        // ===== DEBUG: Chụp screenshot sau Next =====
+        await page.screenshot({ path: '/tmp/after_next.png', fullPage: true });
+        console.log('   📸 Screenshot after Next saved');
+        
+        // Log tất cả buttons hiện tại
+        const btns = await page.evaluate(() => 
+            Array.from(document.querySelectorAll('button'))
+                .map(b => b.textContent.trim())
+                .filter(t => t.length > 0)
+        );
+        console.log('   🔘 Buttons sau Next:', btns);
+        
+        // Log URL hiện tại
+        console.log('   🌐 URL sau Next:', page.url());
         // ===== BƯỚC 3: Click Submit =====
         console.log('   📝 Bước 3: Submit...');
 
